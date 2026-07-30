@@ -68,9 +68,15 @@ def eval_case(engine: LearningEngine, case: dict) -> dict:
     q2 = move == expected_move
 
     need_follow = score < 90 or bool(misc)
-    q3 = (not need_follow) or (
-        len(follow) == 1 and follow[0].strip().endswith("?")
-    ) or (len(follow) == 1 and "?" in follow[0])
+    has_question = False
+    if follow:
+        text = follow[0] if isinstance(follow[0], str) else ""
+        has_question = "?" in text
+    # MCQ path: check_question.question must exist and end as question
+    cq = result.check_question or {}
+    if cq.get("question") and cq.get("options") and cq.get("correct_option"):
+        has_question = True
+    q3 = (not need_follow) or (len(follow) == 1 and has_question)
 
     expect_empty = bool(case.get("expect_empty_misconceptions", True))
     if expect_empty:
