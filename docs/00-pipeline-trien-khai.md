@@ -426,18 +426,18 @@ repo/
 
 ## 8. Phân công mẫu + Definition of Done
 
-### 8.1 Phân công (điền tên tại CP1)
+### 8.1 Phân công
 
 | Phần | Người phụ trách | Backup |
 |---|---|---|
-| Spec (`spec.md` §1–§9) | _[Tên]_ | |
-| Evidence / mining + khảo sát | _[Tên]_ | |
-| Prompt + Understanding / Misconception | _[Tên]_ | |
-| Strategy rules + Follow-up + `codebase/` | _[Tên]_ | |
-| Eval golden set + bảng kết quả | _[Tên]_ | |
-| Dashboard KPI tối thiểu | _[Tên]_ | |
-| Demo slides + dry run | _[Tên]_ | |
-| Validation log | _[Tên]_ | |
+| Spec (`spec.md` §1–§9) | Ngô Hùng Phúc — 2A202601069 | Nguyễn Văn Linh |
+| Evidence / mining + khảo sát | Nguyễn Văn Linh — 2A202601971 | Lê Văn Long |
+| Prompt + Understanding / Misconception | Nguyễn Duy Hoàng — 2A202601147 | Nguyễn Ngọc Dương |
+| Strategy rules + Follow-up + `codebase/` | Nguyễn Ngọc Dương — 2A202601717 | Nguyễn Duy Hoàng |
+| Eval golden set + bảng kết quả | Lê Văn Long — 2A20261711 | Ngô Hùng Phúc |
+| Dashboard KPI tối thiểu | Nguyễn Ngọc Dương — 2A202601717 | |
+| Demo slides + dry run | Ngô Hùng Phúc — 2A202601069 | cả nhóm |
+| Validation log | Nguyễn Văn Linh — 2A202601971 | cả nhóm |
 
 > Vibe-coding rule: bị hỏi tại CP5/CP6 mà không giải thích được phần có tên mình → rủi ro 0 điểm phần liên quan.
 

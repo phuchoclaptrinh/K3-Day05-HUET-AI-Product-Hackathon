@@ -51,6 +51,7 @@ def eval_case(engine: LearningEngine, case: dict) -> dict:
         case["student_message"],
         history=case.get("history") or [],
         generate_response=False,
+        generate_followup_llm=False,  # eval Q3 chỉ cần có câu hỏi; tiết kiệm quota
     )
     score = result.understanding_score
     conf = result.confidence

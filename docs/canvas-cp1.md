@@ -6,4 +6,8 @@
 4. **Evidence:** `asked_check_question` 3/2522; misconceptions/follow_ups = []; ~85% `review_concept` (xem `eval/evidence-quotes.md`)  
 5. **Lát cắt:** Học viên đang học trong lớp · muốn biết mình đã hiểu khái niệm vừa hỏi chưa · hệ thống ước lượng mức hiểu + chọn teaching move · học viên nhận câu hỏi kiểm tra / bước học tiếp  
 6. **Automation:** Conditional — sai kiến thức thì đắt  
-7. **Willing users ≥3 + phân công:** _(điền tên nhóm)_
+7. **Willing users ≥3 + phân công:**  
+   - Phân công: Phúc (Spec/Demo) · Linh (Evidence/Validation) · Hoàng (Prompt/Estimator) · Dương (Code/UI) · Long (Eval)  
+   - Willing users: tuyển ≥3 HV **ngoài nhóm** trước CP5 (chưa chốt tên)
+
+Xem checklist CP4: [`docs/checklist-cp4.md`](checklist-cp4.md) · Spec: [`../spec.md`](../spec.md)

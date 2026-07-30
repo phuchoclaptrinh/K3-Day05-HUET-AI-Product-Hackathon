@@ -5,6 +5,24 @@ from .estimator import EstimateResult
 from .llm_client import call_llm_text, resolve_mode
 from .strategy import StrategyResult
 
+STRATEGY_GUIDE = {
+    "review_concept": (
+        "Ôn lại đúng 1–2 ý cốt lõi, ngắn gọn; nếu có misconception thì sửa chỗ đó trước."
+    ),
+    "give_example": (
+        "Cho 1 ví dụ rất ngắn gắn với câu hỏi của học viên, rồi rút ra bài học."
+    ),
+    "validate_understanding": (
+        "Đừng giảng dài. Tóm tắt tối đa 2 câu rồi chuyển sang câu hỏi kiểm tra."
+    ),
+    "give_hint": (
+        "Đưa 1 gợi ý định hướng, không đưa đáp án đầy đủ."
+    ),
+    "next_topic": (
+        "Xác nhận học viên đã nắm khá tốt; gợi ý bước tiếp theo nhẹ nhàng."
+    ),
+}
+
 
 def generate_tutor_response(
     ctx: ConversationContext,
@@ -15,17 +33,26 @@ def generate_tutor_response(
     """Return (tutor_response, provider)."""
     follow = follow_ups[0] if follow_ups else ""
     mode = resolve_mode()
+    guide = STRATEGY_GUIDE.get(strategy.teaching_strategy, "Dạy đúng mức hiểu hiện tại.")
 
     if mode != "mock":
         try:
             system = (
-                "Bạn là AI Tutor VLearn trong lớp học. Trả lời tiếng Việt, đúng cỡ, sư phạm. "
-                "Cấu trúc bắt buộc: (1) dạy theo teaching_strategy, (2) một câu chuyển tiếp, "
-                "(3) kết thúc bằng đúng câu follow-up được cung cấp. "
-                "Không làm bài hộ. Không bịa số trang nếu không có trong ngữ cảnh."
+                "Bạn là AI Tutor VLearn trong lớp học. Giọng sư phạm, tiếng Việt, đúng cỡ.\n"
+                "Cấu trúc bắt buộc:\n"
+                "1) 2–5 câu dạy theo teaching_strategy\n"
+                "2) Một câu chuyển tiếp ngắn\n"
+                "3) Kết thúc bằng ĐÚNG câu follow-up được cung cấp (không sửa nội dung)\n\n"
+                "Không làm bài hộ. Không bịa số trang/trích dẫn nếu không có trong ngữ cảnh. "
+                "Không lặp lại nguyên văn câu hỏi học viên. Không mở đầu bằng lời chào dài."
             )
             user = f"""STUDENT: {ctx.student_latest}
+TOPIC_HINT: {ctx.topic_hint or "(không có)"}
+HISTORY:
+{ctx.history_text() or "(trống)"}
+
 STRATEGY: {strategy.teaching_strategy}
+STRATEGY_GUIDE: {guide}
 UNDERSTANDING: {estimate.understanding_score}% ({estimate.confidence})
 REASON: {estimate.understanding_reason}
 MISCONCEPTIONS: {estimate.misconceptions or []}

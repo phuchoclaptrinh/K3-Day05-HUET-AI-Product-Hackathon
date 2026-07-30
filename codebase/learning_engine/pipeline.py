@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
-from .context import ConversationContext, build_context
+from .context import build_context
 from .estimator import EstimateResult, estimate_understanding
 from .followup import generate_followup
 from .response import generate_tutor_response
@@ -26,6 +26,7 @@ class TurnResult:
     follow_ups: list[str]
     tutor_response: str
     provider_estimate: str
+    provider_followup: str
     provider_response: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -40,8 +41,12 @@ class LearningEngine:
         topic_hint: str = "",
         day_code: str = "",
         generate_response: bool = True,
+        generate_followup_llm: bool = True,
     ) -> TurnResult:
-        """generate_response=False bỏ qua call sinh câu trả lời (tiết kiệm quota khi eval)."""
+        """generate_response=False bỏ qua call sinh câu trả lời (tiết kiệm quota khi eval).
+
+        generate_followup_llm=False buộc dùng template (eval Q3 vẫn ổn, đỡ tốn quota).
+        """
         ctx = build_context(student_message, history, topic_hint, day_code)
         estimate = estimate_understanding(ctx)
         strategy = select_strategy(
@@ -49,19 +54,42 @@ class LearningEngine:
             estimate.confidence,
             estimate.misconceptions,
         )
-        follow_ups = generate_followup(
-            ctx,
-            strategy.teaching_strategy,
-            estimate.misconceptions,
-            estimate.understanding_score,
-        )
+        if generate_followup_llm:
+            follow_ups, provider_followup = generate_followup(
+                ctx,
+                strategy.teaching_strategy,
+                estimate.misconceptions,
+                estimate.understanding_score,
+                understanding_reason=estimate.understanding_reason,
+                confidence=estimate.confidence,
+            )
+        else:
+            # Eval path: chỉ cần đúng 1 câu hỏi theo rule — dùng template
+            from .followup import _template_followup
+
+            follow_ups = [
+                _template_followup(
+                    ctx,
+                    strategy.teaching_strategy,
+                    estimate.misconceptions,
+                    estimate.understanding_score,
+                )
+            ]
+            provider_followup = "template"
         if generate_response:
             tutor_response, provider_response = generate_tutor_response(
                 ctx, estimate, strategy, follow_ups
             )
         else:
             tutor_response, provider_response = "", "skipped"
-        return self._pack(estimate, strategy, follow_ups, tutor_response, provider_response)
+        return self._pack(
+            estimate,
+            strategy,
+            follow_ups,
+            tutor_response,
+            provider_followup,
+            provider_response,
+        )
 
     @staticmethod
     def _pack(
@@ -69,6 +97,7 @@ class LearningEngine:
         strategy: StrategyResult,
         follow_ups: list[str],
         tutor_response: str,
+        provider_followup: str,
         provider_response: str,
     ) -> TurnResult:
         return TurnResult(
@@ -86,5 +115,6 @@ class LearningEngine:
             follow_ups=follow_ups,
             tutor_response=tutor_response,
             provider_estimate=estimate.provider,
+            provider_followup=provider_followup,
             provider_response=provider_response,
         )
