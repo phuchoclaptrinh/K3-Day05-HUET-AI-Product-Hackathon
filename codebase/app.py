@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from collections import Counter
 from html import escape
 from pathlib import Path
 
@@ -16,6 +15,226 @@ if str(ROOT) not in sys.path:
 from learning_engine.llm_client import resolve_mode  # noqa: E402
 from learning_engine.pipeline import LearningEngine  # noqa: E402
 from learning_engine.flow_lab import cache_stats, run_flow_lab  # noqa: E402
+from learning_engine.grading import grade_check_answer  # noqa: E402
+from learning_engine.followup import CheckQuestion  # noqa: E402
+from learning_engine.response import _mcq_block  # noqa: E402
+from learning_engine.example import ExampleIllustration  # noqa: E402
+
+
+def _fresh_engine() -> LearningEngine:
+    """Tạo engine mới — không reload module (reload dễ làm Streamlit lỗi trên UI)."""
+    return LearningEngine()
+
+
+def _example_block_from_dict(ex: dict | None) -> str:
+    if not ex:
+        return ""
+    try:
+        obj = ExampleIllustration(
+            title=str(ex.get("title") or "Ví dụ"),
+            scenario=str(ex.get("scenario") or ""),
+            mapping=str(ex.get("mapping") or ""),
+            takeaway=str(ex.get("takeaway") or ""),
+            provider=str(ex.get("provider") or "template"),
+        )
+        return obj.markdown()
+    except Exception:
+        return ""
+
+
+def _strip_structured_blocks(text: str) -> str:
+    """Giữ phần giảng, bỏ ví dụ/MCQ/take-note đã tách ra UI riêng."""
+    text = (text or "").strip()
+    for marker in ("### Ví dụ minh họa", "### Câu hỏi kiểm tra"):
+        if marker in text:
+            text = text.split(marker)[0].rstrip()
+            if text.endswith("---"):
+                text = text[:-3].rstrip()
+    # Gỡ dòng take-note markdown nếu còn
+    lines = []
+    for line in text.splitlines():
+        if "Take-note:" in line or "📝" in line:
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _compose_assistant_content(data: dict, raw_response: str) -> str:
+    """Nội dung chat đầy đủ (fallback); UI cũng render tách block cho dễ thấy."""
+    text = _strip_structured_blocks(raw_response)
+    take_note = (data.get("scope_take_note") or "").strip()
+    example = data.get("example")
+    check = data.get("check_question")
+    band = data.get("scope_category") or ""
+
+    parts: list[str] = []
+    if band == "related_external" and take_note:
+        parts.append(take_note)
+    if text:
+        parts.append(text)
+    if band == "in_lesson" and example:
+        block = _example_block_from_dict(example)
+        if block:
+            parts.append(block)
+    if check and check.get("options"):
+        try:
+            cq = CheckQuestion(
+                question=str(check.get("question") or ""),
+                options=dict(check.get("options") or {}),
+                correct_option=str(check.get("correct_option") or "A"),
+                explanation=str(check.get("explanation") or ""),
+                intent=str(check.get("intent") or "check"),
+            )
+            parts.append(_mcq_block(cq))
+        except Exception:
+            pass
+    return "\n\n".join(parts).strip()
+
+
+def _ensure_mcq_in_content(content: str, check: dict | None) -> str:
+    """Backward-compatible wrapper."""
+    return _compose_assistant_content(
+        {"check_question": check, "scope_category": "in_lesson"},
+        content,
+    )
+
+
+def _strategy_label(code: str) -> str:
+    return {
+        "review_concept": "Ôn lại khái niệm",
+        "give_example": "Minh họa bằng ví dụ",
+        "validate_understanding": "Kiểm tra hiểu bài",
+        "give_hint": "Gợi ý hướng nghĩ",
+        "next_topic": "Sang ý tiếp theo",
+        "out_of_scope": "Ngoài phạm vi",
+    }.get(code or "", code or "—")
+
+
+def _band_label(band: str) -> str:
+    return {
+        "in_lesson": "Trong bài học",
+        "related_external": "Ngoài bài · hơi liên quan",
+        "refuse": "Từ chối",
+        "greeting": "Chào hỏi",
+        "ambiguous": "Chưa rõ",
+    }.get(band or "", band or "—")
+
+
+def _score_tone(score: int) -> str:
+    if score >= 71:
+        return "high"
+    if score >= 40:
+        return "mid"
+    return "low"
+
+
+def _render_mcq_preview(check: dict) -> None:
+    """Chỉ xem trước phương án trong lịch sử chat (không chọn ở đây)."""
+    opts = check.get("options") or {}
+    rows = "".join(
+        f'<div class="mcq-opt"><span class="mcq-key">{escape(k)}</span>'
+        f"<span>{escape(str(opts[k]))}</span></div>"
+        for k in ("A", "B", "C", "D")
+        if k in opts
+    )
+    st.markdown(
+        f"""
+        <div class="mcq-card">
+          <div class="mcq-card-label">Câu hỏi kiểm tra</div>
+          <div class="mcq-q">{escape(check.get("question") or "")}</div>
+          {rows}
+          <div class="mcq-hint">Trả lời ở khung bên dưới đoạn chat để cập nhật mức hiểu.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _handle_mcq_submit(check: dict, choice_label: str | None, last: dict) -> bool:
+    """Xử lý nộp MCQ. True nếu đã rerun."""
+    if not choice_label:
+        st.warning("Hãy chọn một đáp án trước khi nộp.")
+        return False
+    selected = choice_label.split(".", 1)[0].strip()
+    graded = grade_check_answer(
+        check,
+        selected,
+        st.session_state.latest_score
+        if st.session_state.latest_score is not None
+        else last["understanding_score"],
+    )
+    st.session_state.latest_score = graded["updated_score"]
+    st.session_state.check_feedback = graded
+    last["understanding_score"] = graded["updated_score"]
+    last["check_result"] = graded
+    if graded["is_correct"]:
+        last["misconceptions"] = []
+        icon, lead = "✅", graded["feedback"]
+    else:
+        icon, lead = "❌", graded["feedback"]
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": (
+                f"{icon} {lead}\n\n"
+                f"Mức hiểu bài: **{graded['previous_score']}% → {graded['updated_score']}%**."
+                + ("" if graded["is_correct"] else " Bạn có thể hỏi lại phần còn chưa rõ.")
+            ),
+        }
+    )
+    st.session_state.pending_check = None
+    return True
+
+
+def _eval_board_html(
+    score: int,
+    confidence: str,
+    strategy: str,
+    band: str,
+    reason: str,
+    misconceptions: list,
+    initial_score: int | None = None,
+) -> str:
+    tone = _score_tone(score)
+    conf_vi = {"low": "Thấp", "medium": "Trung bình", "high": "Cao"}.get(confidence, confidence)
+    misc_html = (
+        "<ul class='eval-misc'>"
+        + "".join(f"<li>{escape(m)}</li>" for m in misconceptions)
+        + "</ul>"
+        if misconceptions
+        else "<div class='eval-ok'>Chưa phát hiện hiểu lầm cụ thể</div>"
+    )
+    delta = ""
+    if initial_score is not None and initial_score != score:
+        delta = (
+            f"<div class='eval-delta'>Sau MCQ: {initial_score}% → <b>{score}%</b></div>"
+        )
+    return f"""
+    <div class="eval-board">
+      <div class="eval-top">
+        <div class="score-ring score-{tone}">
+          <div class="score-num">{score}%</div>
+          <div class="score-cap">Mức hiểu</div>
+        </div>
+        <div class="eval-facts">
+          <div class="fact"><span>Độ tin cậy</span><b>{escape(str(conf_vi))}</b></div>
+          <div class="fact"><span>Chiến lược</span><b>{escape(_strategy_label(strategy))}</b></div>
+          <div class="fact"><span>Phạm vi</span><b>{escape(_band_label(band))}</b></div>
+        </div>
+      </div>
+      <div class="score-bar"><div class="score-fill score-{tone}" style="width:{max(4, min(100, score))}%"></div></div>
+      {delta}
+      <div class="eval-reason">
+        <span class="signal-label">Vì sao đánh giá vậy?</span>
+        {escape(reason or "—")}
+      </div>
+      <div class="eval-misc-wrap">
+        <span class="signal-label">Hiểu lầm</span>
+        {misc_html}
+      </div>
+    </div>
+    """
+
 
 st.set_page_config(
     page_title="VLearn · Learning Tutor",
@@ -27,172 +246,233 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Nền và typography */
+    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+    :root {
+      --ink: #1c1917;
+      --muted: #78716c;
+      --line: #e7e5e4;
+      --paper: #fafaf9;
+      --card: #ffffff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --rose: #be123c;
+      --sky: #0369a1;
+    }
     .stApp {
-        background:
-            radial-gradient(circle at 4% 0%, rgba(219, 234, 254, .72), transparent 25rem),
-            radial-gradient(circle at 96% 5%, rgba(204, 251, 241, .55), transparent 24rem),
-            #f8fafc;
-        color: #172033;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(ellipse 70% 40% at 0% -10%, rgba(15,118,110,.10), transparent 55%),
+        radial-gradient(ellipse 50% 35% at 100% 0%, rgba(180,83,9,.07), transparent 50%),
+        linear-gradient(180deg, #f5f5f4 0%, #fafaf9 40%, #f5f5f4 100%);
+      color: var(--ink);
     }
-    .block-container {
-        max-width: 1380px;
-        padding-top: 1.5rem;
-        padding-bottom: 2rem;
+    .block-container { max-width: 1280px; padding-top: 1.1rem; padding-bottom: 2rem; }
+    h1,h2,h3, .brand-title, .section-heading {
+      font-family: "Fraunces", Georgia, serif !important;
+      letter-spacing: -.01em;
     }
-    h1, h2, h3 { color: #14213d !important; letter-spacing: -.02em; }
 
-    /* Hero */
     .hero {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        padding: 1.15rem 1.35rem;
-        margin-bottom: .85rem;
-        background: rgba(255, 255, 255, .88);
-        border: 1px solid #e2e8f0;
-        border-radius: 20px;
-        box-shadow: 0 12px 35px rgba(15, 23, 42, .06);
-        backdrop-filter: blur(10px);
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      padding: 1rem 1.25rem; margin-bottom: .75rem;
+      background: rgba(255,255,255,.82);
+      border: 1px solid var(--line); border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(28,25,23,.04);
     }
-    .brand { display: flex; align-items: center; gap: .9rem; }
+    .brand { display: flex; align-items: center; gap: .85rem; }
     .brand-icon {
-        display: grid; place-items: center;
-        width: 48px; height: 48px;
-        border-radius: 15px;
-        background: linear-gradient(145deg, #2563eb, #4f46e5);
-        color: white; font-size: 1.45rem;
-        box-shadow: 0 8px 20px rgba(37, 99, 235, .24);
+      width: 46px; height: 46px; border-radius: 14px;
+      display: grid; place-items: center;
+      background: linear-gradient(145deg, #0f766e, #115e59);
+      color: #ecfdf5; font-size: 1.25rem;
     }
-    .brand-title { font-size: 1.28rem; font-weight: 750; color: #172554; }
-    .brand-subtitle { margin-top: .15rem; color: #64748b; font-size: .9rem; }
+    .brand-title { font-size: 1.35rem; font-weight: 700; color: #1c1917; }
+    .brand-subtitle { margin-top: .12rem; color: var(--muted); font-size: .9rem; }
     .provider-pill {
-        flex: none; padding: .48rem .78rem; border-radius: 999px;
-        font-size: .8rem; font-weight: 650;
-        background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+      padding: .42rem .72rem; border-radius: 999px; font-size: .78rem; font-weight: 650;
+      background: var(--teal-soft); color: var(--teal); border: 1px solid #99f6e4;
     }
     .provider-pill.mock { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
 
-    /* Tiêu đề section */
     .section-heading {
-        display: flex; align-items: center; gap: .55rem;
-        margin: .35rem 0 .65rem;
-        color: #1e293b; font-size: 1rem; font-weight: 720;
+      display: flex; align-items: center; gap: .5rem;
+      margin: .2rem 0 .7rem; color: #1c1917; font-size: 1.05rem; font-weight: 700;
     }
     .section-heading span {
-        display: grid; place-items: center; width: 30px; height: 30px;
-        border-radius: 10px; background: #eff6ff;
+      width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center;
+      background: #f5f5f4; font-size: .9rem;
     }
 
-    /* Cards và chat */
     [data-testid="stVerticalBlockBorderWrapper"] {
-        background: rgba(255,255,255,.9);
-        border-color: #e2e8f0 !important;
-        border-radius: 18px !important;
-        box-shadow: 0 8px 28px rgba(15,23,42,.045);
+      background: rgba(255,255,255,.92) !important;
+      border-color: var(--line) !important; border-radius: 16px !important;
+      box-shadow: 0 6px 22px rgba(28,25,23,.04);
     }
     [data-testid="stChatMessage"] {
-        border-radius: 16px;
-        padding: .7rem .85rem;
-        margin-bottom: .55rem;
+      border-radius: 14px; padding: .55rem .65rem; margin-bottom: .4rem;
+      border: 1px solid transparent;
     }
     [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
-        background: #eff6ff;
-        border: 1px solid #dbeafe;
+      background: #f0fdfa; border-color: #ccfbf1;
     }
     [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
+      background: #fff; border-color: var(--line);
     }
     [data-testid="stChatInput"] {
-        border: 1px solid #cbd5e1;
-        border-radius: 15px;
-        box-shadow: 0 5px 18px rgba(15, 23, 42, .06);
+      border: 1px solid #d6d3d1; border-radius: 14px;
+      box-shadow: 0 4px 16px rgba(28,25,23,.05);
     }
     [data-testid="stChatInput"]:focus-within {
-        border-color: #60a5fa;
-        box-shadow: 0 0 0 3px rgba(96, 165, 250, .16);
+      border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,.15);
     }
 
-    /* Metrics */
-    [data-testid="stMetric"] {
-        background: white;
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: .7rem .85rem;
+    .topic-chip-row { display: flex; flex-wrap: wrap; gap: .4rem; margin: .35rem 0 .65rem; }
+    .topic-chip {
+      padding: .28rem .55rem; border-radius: 999px; font-size: .78rem; font-weight: 600;
+      background: #f5f5f4; color: #44403c; border: 1px solid var(--line);
     }
-    [data-testid="stMetricValue"] { color: #1d4ed8; }
+
+    .note-card, .example-card, .mcq-card {
+      margin: .55rem 0; padding: .85rem 1rem; border-radius: 14px; font-size: .92rem;
+    }
+    .note-card {
+      background: #fffbeb; border: 1px solid #fde68a; color: #78350f;
+    }
+    .example-card {
+      background: #f0fdfa; border: 1px solid #99f6e4; color: #134e4a;
+    }
+    .example-card b { color: #0f766e; }
+    .mcq-card {
+      background: #f8fafc; border: 1px solid #cbd5e1;
+    }
+    .mcq-card-label, .signal-label {
+      display: block; margin-bottom: .3rem;
+      font-size: .7rem; font-weight: 700; letter-spacing: .05em;
+      text-transform: uppercase; color: #78716c;
+    }
+    .mcq-q { font-weight: 650; color: #1c1917; margin-bottom: .55rem; line-height: 1.4; }
+    .mcq-opt {
+      display: flex; gap: .55rem; align-items: flex-start;
+      padding: .45rem .55rem; margin: .28rem 0;
+      background: #fff; border: 1px solid var(--line); border-radius: 10px;
+      color: #44403c; font-size: .9rem;
+    }
+    .mcq-key {
+      flex: none; width: 1.55rem; height: 1.55rem; border-radius: 7px;
+      display: grid; place-items: center;
+      background: #0f766e; color: #fff; font-size: .75rem; font-weight: 700;
+    }
+    .mcq-hint { margin-top: .55rem; color: var(--muted); font-size: .8rem; }
+
+    .quiz-dock {
+      margin-top: .65rem; padding: 1rem 1.05rem;
+      border-radius: 16px; border: 1px solid #99f6e4;
+      background: linear-gradient(180deg, #f0fdfa, #fff);
+      box-shadow: 0 8px 24px rgba(15,118,110,.08);
+    }
+    .quiz-dock h4 {
+      margin: 0 0 .35rem; font-family: Fraunces, Georgia, serif;
+      color: #0f766e; font-size: 1.05rem;
+    }
+
+    .eval-board {
+      padding: 1rem; border-radius: 16px; border: 1px solid var(--line);
+      background: var(--card); box-shadow: 0 8px 24px rgba(28,25,23,.04);
+    }
+    .eval-top { display: flex; gap: .9rem; align-items: center; margin-bottom: .7rem; }
+    .score-ring {
+      width: 88px; height: 88px; border-radius: 50%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border: 4px solid #d6d3d1; background: #fafaf9;
+    }
+    .score-ring.score-high { border-color: #14b8a6; background: #f0fdfa; }
+    .score-ring.score-mid { border-color: #f59e0b; background: #fffbeb; }
+    .score-ring.score-low { border-color: #f43f5e; background: #fff1f2; }
+    .score-num { font-family: Fraunces, Georgia, serif; font-size: 1.35rem; font-weight: 700; line-height: 1; }
+    .score-cap { font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: .15rem; }
+    .eval-facts { flex: 1; display: flex; flex-direction: column; gap: .35rem; }
+    .fact { display: flex; justify-content: space-between; gap: .5rem; font-size: .86rem; color: var(--muted); }
+    .fact b { color: #1c1917; font-weight: 650; text-align: right; }
+    .score-bar { height: 8px; border-radius: 99px; background: #e7e5e4; overflow: hidden; margin-bottom: .55rem; }
+    .score-fill { height: 100%; border-radius: 99px; }
+    .score-fill.score-high { background: #14b8a6; }
+    .score-fill.score-mid { background: #f59e0b; }
+    .score-fill.score-low { background: #f43f5e; }
+    .eval-delta { font-size: .82rem; color: var(--teal); margin-bottom: .45rem; }
+    .eval-reason, .eval-misc-wrap {
+      padding: .65rem .7rem; margin-top: .4rem; border-radius: 12px;
+      background: #fafaf9; border: 1px solid var(--line); color: #44403c; font-size: .88rem;
+    }
+    .eval-ok { color: var(--teal); font-weight: 600; font-size: .88rem; }
+    .eval-misc { margin: .2rem 0 0; padding-left: 1.1rem; color: var(--rose); }
     .signal-card {
-        padding: .8rem .9rem; margin: .45rem 0;
-        border: 1px solid #e2e8f0; border-radius: 13px;
-        background: #f8fafc; color: #475569; font-size: .9rem;
-    }
-    .signal-label {
-        display: block; margin-bottom: .22rem;
-        color: #64748b; font-size: .72rem; font-weight: 700;
-        letter-spacing: .06em; text-transform: uppercase;
+      padding: .75rem .85rem; margin: .4rem 0; border: 1px solid var(--line);
+      border-radius: 12px; background: #fafaf9; color: #57534e; font-size: .88rem;
     }
     .tag {
-        display: inline-block; padding: .2rem .5rem; border-radius: 7px;
-        background: #eef2ff; color: #4338ca; font-size: .78rem; font-weight: 650;
+      display: inline-block; padding: .18rem .48rem; border-radius: 7px;
+      background: #ccfbf1; color: #0f766e; font-size: .78rem; font-weight: 650;
     }
     .empty-chat {
-        min-height: 400px; display: flex; flex-direction: column;
-        align-items: center; justify-content: center; text-align: center;
-        color: #64748b;
+      min-height: 360px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center; color: var(--muted);
     }
     .empty-icon {
-        display: grid; place-items: center; width: 58px; height: 58px;
-        margin-bottom: .8rem; border-radius: 18px;
-        background: #eff6ff; font-size: 1.65rem;
+      width: 56px; height: 56px; margin-bottom: .7rem; border-radius: 16px;
+      display: grid; place-items: center; background: #f0fdfa; font-size: 1.5rem;
     }
-    .empty-title { color: #334155; font-weight: 700; margin-bottom: .25rem; }
-    .empty-copy { font-size: .86rem; max-width: 300px; }
+    .empty-title { color: #292524; font-family: Fraunces, Georgia, serif; font-weight: 700; margin-bottom: .25rem; }
+    .empty-copy { font-size: .86rem; max-width: 320px; }
 
-    /* Flow Lab */
+    .turn-table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: .35rem; }
+    .turn-table th, .turn-table td {
+      padding: .4rem .35rem; border-bottom: 1px solid var(--line); text-align: left;
+    }
+    .turn-table th { color: var(--muted); font-weight: 650; font-size: .7rem; text-transform: uppercase; }
+    .pill-mini {
+      display: inline-block; padding: .1rem .35rem; border-radius: 6px;
+      background: #f5f5f4; color: #44403c; font-size: .72rem; font-weight: 600;
+    }
+
     .flow-banner {
-        padding: .9rem 1rem; margin: .4rem 0 1rem;
-        border-radius: 14px; border: 1px solid #dbeafe;
-        background: linear-gradient(180deg, #eff6ff, #f8fbff);
-        color: #1e3a8a; font-size: .9rem;
+      padding: .85rem 1rem; margin: .35rem 0 1rem; border-radius: 12px;
+      border: 1px solid #d6d3d1; background: #fafaf9; color: #44403c; font-size: .88rem;
     }
     .flow-step {
-        padding: .75rem .9rem; margin: .45rem 0;
-        border: 1px solid #e2e8f0; border-radius: 12px;
-        background: #fff;
+      padding: .7rem .85rem; margin: .4rem 0; border: 1px solid var(--line);
+      border-radius: 11px; background: #fff;
     }
     .flow-step-title {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: .5rem; margin-bottom: .28rem;
-        color: #0f172a; font-weight: 700; font-size: .92rem;
+      display: flex; justify-content: space-between; gap: .5rem;
+      margin-bottom: .25rem; font-weight: 700; font-size: .9rem;
     }
     .src-pill {
-        display: inline-block; padding: .15rem .48rem; border-radius: 999px;
-        font-size: .72rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: .04em;
+      display: inline-block; padding: .12rem .42rem; border-radius: 999px;
+      font-size: .7rem; font-weight: 700; text-transform: uppercase;
     }
     .src-cache { background: #ecfdf5; color: #047857; }
-    .src-golden_set { background: #eff6ff; color: #1d4ed8; }
+    .src-golden_set { background: #e0f2fe; color: #0369a1; }
     .src-api { background: #fff7ed; color: #c2410c; }
-    .src-rule, .src-local, .src-template {
-        background: #f1f5f9; color: #475569;
-    }
-    .flow-step-detail { color: #64748b; font-size: .86rem; }
+    .src-rule, .src-local, .src-template { background: #f5f5f4; color: #57534e; }
+    .flow-step-detail { color: var(--muted); font-size: .84rem; }
 
-    /* Buttons */
     .stButton > button {
-        border-radius: 11px; border-color: #cbd5e1;
-        color: #334155; font-weight: 600;
+      border-radius: 11px; border-color: #d6d3d1; color: #44403c; font-weight: 600;
     }
-    .stButton > button:hover {
-        border-color: #3b82f6; color: #1d4ed8; background: #eff6ff;
+    .stButton > button[kind="primary"], .stButton > button[data-testid="baseButton-primary"] {
+      background: #0f766e; border-color: #0f766e; color: #fff;
     }
-    hr { border-color: #e2e8f0 !important; }
+    .stButton > button:hover { border-color: #0f766e; color: #0f766e; background: #f0fdfa; }
+    [data-testid="stMetric"] {
+      background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: .55rem .7rem;
+    }
+    [data-testid="stMetricValue"] { color: #0f766e; }
+    hr { border-color: var(--line) !important; }
     @media (max-width: 760px) {
-        .hero { align-items: flex-start; }
-        .provider-pill { display: none; }
-        .block-container { padding: .8rem; }
+      .hero { align-items: flex-start; }
+      .provider-pill { display: none; }
+      .eval-top { flex-direction: column; align-items: flex-start; }
     }
     </style>
     """,
@@ -206,11 +486,11 @@ st.markdown(
     f"""
     <div class="hero">
       <div class="brand">
-        <div class="brand-icon">✦</div>
+        <div class="brand-icon">V</div>
         <div>
           <div class="brand-title">VLearn Learning Tutor</div>
           <div class="brand-subtitle">
-            Hiểu bạn đang học đến đâu · Chọn cách hướng dẫn phù hợp
+            Hỏi khái niệm · xem ví dụ · làm câu kiểm tra · theo dõi mức hiểu
           </div>
         </div>
       </div>
@@ -228,107 +508,52 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "turn_logs" not in st.session_state:
     st.session_state.turn_logs = []
+if "pending_check" not in st.session_state:
+    st.session_state.pending_check = None
+if "latest_score" not in st.session_state:
+    st.session_state.latest_score = None
+if "check_feedback" not in st.session_state:
+    st.session_state.check_feedback = None
 
-col_chat, col_side = st.columns([1.55, 1], gap="large")
+col_chat, col_side = st.columns([1.65, 1], gap="large")
 
-with col_side:
-    st.markdown(
-        '<div class="section-heading"><span>🧭</span> Phân tích lượt học</div>',
-        unsafe_allow_html=True,
-    )
-    if st.session_state.turn_logs:
-        last = st.session_state.turn_logs[-1]
-        metric_col, confidence_col = st.columns(2)
-        with metric_col:
-            st.metric("Mức độ hiểu", f"{last['understanding_score']}%")
-        with confidence_col:
-            confidence_labels = {"low": "Thấp", "medium": "Trung bình", "high": "Cao"}
-            st.metric("Độ tin cậy", confidence_labels.get(last["confidence"], last["confidence"]))
-
-        st.markdown(
-            f"""
-            <div class="signal-card">
-              <span class="signal-label">Vì sao hệ thống đánh giá như vậy?</span>
-              {escape(last["understanding_reason"])}
-            </div>
-            <div class="signal-card">
-              <span class="signal-label">Chiến lược hướng dẫn</span>
-              <span class="tag">{escape(last["teaching_strategy"])}</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        misconceptions = last["misconceptions"]
-        if misconceptions:
-            st.error("Hiểu lầm cần điều chỉnh: " + " · ".join(misconceptions))
-        else:
-            st.success("Chưa phát hiện hiểu lầm cụ thể.")
-
-        followup = last["follow_ups"][0] if last["follow_ups"] else "Chưa có gợi ý tiếp theo."
-        follow_src = last.get("provider_followup", "template")
-        st.markdown(
-            f"""
-            <div class="signal-card">
-              <span class="signal-label">Câu hỏi tiếp theo · {escape(follow_src)}</span>
-              {escape(followup)}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if st.button("Bỏ qua gợi ý", use_container_width=True):
-            st.info("Bạn có thể tiếp tục đặt bất kỳ câu hỏi nào trong khung chat.")
-    else:
-        with st.container(border=True):
-            st.markdown(
-                "Hệ thống sẽ hiển thị **mức độ hiểu**, **chiến lược dạy** "
-                "và **gợi ý tiếp theo** sau câu hỏi đầu tiên."
-            )
-
-    st.markdown(
-        '<div class="section-heading"><span>📈</span> Tiến trình buổi học</div>',
-        unsafe_allow_html=True,
-    )
-    logs = st.session_state.turn_logs
-    if logs:
-        scores = [t["understanding_score"] for t in logs]
-        st.caption("Mức độ hiểu qua từng lượt")
-        st.line_chart({"Mức độ hiểu": scores}, height=170)
-        moves = Counter(t["teaching_strategy"] for t in logs)
-        st.caption("Phân bố chiến lược hướng dẫn")
-        st.bar_chart(dict(moves), height=170)
-        misc_n = sum(len(t["misconceptions"]) for t in logs)
-        check_n = sum(1 for t in logs if t["asked_check_question"])
-        kpi_a, kpi_b = st.columns(2)
-        kpi_a.metric("Hiểu lầm", misc_n)
-        kpi_b.metric("Lượt kiểm tra", f"{check_n}/{len(logs)}")
-    else:
-        st.caption("Biểu đồ tiến trình sẽ xuất hiện sau khi bắt đầu học.")
-
+# ---------------------------------------------------------------------------
+# Cột trái — Chat + trả lời MCQ
+# ---------------------------------------------------------------------------
 with col_chat:
     st.markdown(
         '<div class="section-heading"><span>💬</span> Không gian học tập</div>',
         unsafe_allow_html=True,
     )
     topic_hint = st.text_input(
-        "Ngữ cảnh bài học (tuỳ chọn)",
+        "Ngữ cảnh bài học",
         value=st.session_state.get("topic_hint", ""),
-        placeholder="Ví dụ: Context window · Binary Search · Problem Statement trang 3",
-        help="Giúp tutor biết bạn đang học phần nào — câu hỏi kiểm tra sẽ sát hơn.",
+        placeholder="Ví dụ: Context window · Transformer · Problem Statement",
+        help="Giúp khớp transcript. Ngoài bài vẫn trả lời kèm take-note; linh tinh sẽ từ chối.",
         key="topic_hint",
     )
-    # Khóa chiều cao khung chat; hội thoại dài sẽ cuộn bên trong thay vì
-    # kéo dài toàn bộ trang và đẩy ô nhập xuống dưới.
-    with st.container(height=520, border=True):
+    st.markdown(
+        """
+        <div class="topic-chip-row">
+          <span class="topic-chip">Gợi ý: Transformer</span>
+          <span class="topic-chip">RAG</span>
+          <span class="topic-chip">Double Diamond</span>
+          <span class="topic-chip">Context window</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.container(height=460, border=True):
         if not st.session_state.messages:
             st.markdown(
                 """
                 <div class="empty-chat">
-                  <div class="empty-icon">💡</div>
-                  <div class="empty-title">Bạn muốn hiểu rõ điều gì hôm nay?</div>
+                  <div class="empty-icon">✦</div>
+                  <div class="empty-title">Bắt đầu bằng một khái niệm trên slide</div>
                   <div class="empty-copy">
-                    Hãy hỏi về một khái niệm, nhờ giải thích ví dụ,
-                    hoặc thử diễn đạt điều bạn vừa học.
+                    Tutor sẽ giải thích, đưa ví dụ (nếu trong bài), rồi hỏi một câu trắc nghiệm
+                    để cập nhật mức hiểu của bạn.
                   </div>
                 </div>
                 """,
@@ -336,40 +561,258 @@ with col_chat:
             )
 
         for msg in st.session_state.messages:
-            # Streamlit chỉ nhận emoji chuẩn / path ảnh / "user"|"assistant"
-            # Ký tự trang trí như "✦" sẽ bị hiểu nhầm thành path → crash.
             avatar = "🧑‍🎓" if msg["role"] == "student" else "🤖"
             with st.chat_message(msg["role"], avatar=avatar):
-                st.markdown(msg["content"])
                 if msg["role"] == "assistant" and msg.get("meta"):
                     m = msg["meta"]
-                    follow_src = m.get("provider_followup", "template")
+                    band = m.get("scope_category", "in_lesson")
+                    if band == "related_external" and m.get("scope_take_note"):
+                        note = m["scope_take_note"].replace("📝 **Take-note:** ", "")
+                        st.markdown(
+                            f'<div class="note-card"><span class="signal-label">Take-note</span>{escape(note)}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    body = _strip_structured_blocks(msg.get("content") or "")
+                    if body:
+                        st.markdown(body)
+                    if band == "in_lesson" and m.get("example"):
+                        ex = m["example"]
+                        st.markdown(
+                            f"""
+                            <div class="example-card">
+                              <span class="signal-label">Ví dụ minh họa · trong bài</span>
+                              <b>{escape(ex.get("title", ""))}</b><br/><br/>
+                              {escape(ex.get("scenario", ""))}<br/><br/>
+                              <i>Ánh xạ:</i> {escape(ex.get("mapping", ""))}<br/>
+                              <i>Ý nhớ:</i> {escape(ex.get("takeaway", ""))}
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    cq = m.get("check_question") or {}
+                    if cq.get("options"):
+                        _render_mcq_preview(cq)
+                    score_show = m.get("understanding_score", "?")
                     st.caption(
-                        f"Hiểu bài {m['understanding_score']}%  ·  "
-                        f"{m['teaching_strategy']}  ·  "
-                        f"ước lượng:{m['provider_estimate']}  ·  "
-                        f"câu hỏi:{follow_src}"
+                        f"{_band_label(band)} · hiểu {score_show}% · "
+                        f"{_strategy_label(m.get('teaching_strategy', ''))}"
                     )
+                else:
+                    st.markdown(msg["content"])
 
-    prompt = st.chat_input("Nhập câu hỏi hoặc chia sẻ điều bạn vừa hiểu…")
+    # Dock trả lời MCQ — ngay dưới chat
+    check = st.session_state.pending_check
+    last = st.session_state.turn_logs[-1] if st.session_state.turn_logs else None
+    already_graded = bool(last and last.get("check_result"))
+    if check and check.get("options") and last and not already_graded:
+        with st.container(border=True):
+            st.markdown("#### Trả lời câu kiểm tra")
+            st.markdown(f"**{check.get('question') or ''}**")
+            option_labels = [
+                f"{k}. {v}" for k, v in sorted((check.get("options") or {}).items())
+            ]
+            choice_label = st.radio(
+                "Chọn một đáp án",
+                options=option_labels,
+                index=None,
+                key=f"mcq_radio_chat_{len(st.session_state.turn_logs)}",
+            )
+            g1, g2 = st.columns([1.2, 1])
+            with g1:
+                submit_mcq = st.button("Nộp đáp án", use_container_width=True, type="primary")
+            with g2:
+                skip_mcq = st.button("Bỏ qua", use_container_width=True)
+
+            if submit_mcq and _handle_mcq_submit(check, choice_label, last):
+                st.rerun()
+            if skip_mcq:
+                st.session_state.pending_check = None
+                st.session_state.check_feedback = {
+                    "skipped": True,
+                    "feedback": "Đã bỏ qua câu trắc nghiệm.",
+                }
+                st.rerun()
+
+    if st.session_state.check_feedback and not st.session_state.check_feedback.get("skipped"):
+        fb = st.session_state.check_feedback
+        if fb.get("is_correct"):
+            st.success(f"Đúng · hiểu bài {fb['previous_score']}% → {fb['updated_score']}%")
+        elif "is_correct" in fb:
+            st.warning(f"Chưa đúng · hiểu bài {fb['previous_score']}% → {fb['updated_score']}%")
+
+    prompt = st.chat_input("Hỏi khái niệm hoặc diễn đạt lại điều bạn vừa hiểu…")
     if prompt:
         st.session_state.messages.append({"role": "student", "content": prompt})
         history = [
             {"role": "student" if m["role"] == "student" else "tutor", "content": m["content"]}
             for m in st.session_state.messages[:-1]
         ]
-        with st.spinner("Tutor đang phân tích cách học phù hợp với bạn…"):
-            result = st.session_state.engine.run(
-                prompt,
-                history=history,
-                topic_hint=topic_hint.strip(),
+        st.session_state.engine = _fresh_engine()
+        with st.spinner("Tutor đang chuẩn bị giải thích và câu kiểm tra…"):
+            try:
+                result = st.session_state.engine.run(
+                    prompt,
+                    history=history,
+                    topic_hint=topic_hint.strip(),
+                )
+            except Exception as exc:
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "Xin lỗi, lượt này chưa xử lý được. "
+                            "Bạn thử hỏi lại hoặc kiểm tra kết nối API / quota.\n\n"
+                            f"_({type(exc).__name__})_"
+                        ),
+                    }
+                )
+                st.session_state.check_feedback = None
+                st.rerun()
+            else:
+                data = result.to_dict()
+                content = _compose_assistant_content(data, result.tutor_response)
+                st.session_state.turn_logs.append(data)
+                st.session_state.latest_score = (
+                    None if data.get("api_calls_skipped") else data["understanding_score"]
+                )
+                st.session_state.pending_check = (
+                    None if data.get("api_calls_skipped") else data.get("check_question")
+                )
+                st.session_state.check_feedback = None
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": content, "meta": data}
+                )
+                st.rerun()
+
+# ---------------------------------------------------------------------------
+# Cột phải — Bảng đánh giá
+# ---------------------------------------------------------------------------
+with col_side:
+    st.markdown(
+        '<div class="section-heading"><span>📊</span> Bảng đánh giá</div>',
+        unsafe_allow_html=True,
+    )
+    if st.session_state.turn_logs:
+        last = st.session_state.turn_logs[-1]
+        if last.get("api_calls_skipped") or last.get("scope_category") in (
+            "refuse",
+            "greeting",
+            "ambiguous",
+        ):
+            st.warning("Ngoài phạm vi — chưa có điểm hiểu bài cho lượt này.")
+            st.markdown(
+                f"""
+                <div class="signal-card">
+                  <span class="signal-label">Phạm vi · {escape(last.get("scope_category", ""))}</span>
+                  {escape(last.get("scope_reason") or "Ngoài phạm vi")}
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-        data = result.to_dict()
-        st.session_state.turn_logs.append(data)
-        st.session_state.messages.append(
-            {"role": "assistant", "content": result.tutor_response, "meta": data}
+        else:
+            shown_score = (
+                st.session_state.latest_score
+                if st.session_state.latest_score is not None
+                else last["understanding_score"]
+            )
+            pre_mcq = None
+            if last.get("check_result"):
+                pre_mcq = last["check_result"].get("previous_score")
+            st.markdown(
+                _eval_board_html(
+                    int(shown_score or 0),
+                    last.get("confidence", "medium"),
+                    last.get("teaching_strategy", ""),
+                    last.get("scope_category", "in_lesson"),
+                    last.get("understanding_reason", ""),
+                    list(last.get("misconceptions") or []),
+                    initial_score=pre_mcq,
+                ),
+                unsafe_allow_html=True,
+            )
+
+            ex = last.get("example")
+            if ex and last.get("scope_category") == "in_lesson":
+                st.markdown(
+                    f"""
+                    <div class="signal-card">
+                      <span class="signal-label">Ví dụ đang dùng</span>
+                      <b>{escape(ex.get("title", ""))}</b><br/>
+                      {escape(ex.get("takeaway", ""))}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            pending = st.session_state.pending_check
+            if pending and pending.get("options") and not last.get("check_result"):
+                st.info("Có câu kiểm tra đang chờ — trả lời ở khung dưới chat.")
+    else:
+        st.markdown(
+            """
+            <div class="signal-card">
+              <span class="signal-label">Chưa có dữ liệu</span>
+              Sau câu hỏi đầu tiên, bảng này hiện mức hiểu, chiến lược dạy,
+              hiểu lầm và lịch sử các lượt.
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        st.rerun()
+
+    st.markdown(
+        '<div class="section-heading"><span>📈</span> Tiến trình buổi</div>',
+        unsafe_allow_html=True,
+    )
+    logs = st.session_state.turn_logs
+    if logs:
+        scores = []
+        for t in logs:
+            if t.get("api_calls_skipped"):
+                continue
+            if t.get("check_result"):
+                scores.append(t["check_result"].get("updated_score", t["understanding_score"]))
+            else:
+                scores.append(t["understanding_score"])
+        if scores:
+            st.caption("Mức hiểu qua từng lượt học")
+            st.line_chart({"Mức hiểu (%)": scores}, height=150)
+
+        # Bảng tóm tắt các lượt
+        rows_html = []
+        for i, t in enumerate(logs, 1):
+            sc = "—"
+            if not t.get("api_calls_skipped"):
+                sc = str(
+                    t.get("check_result", {}).get("updated_score", t.get("understanding_score", "—"))
+                )
+            mcq = "✓" if t.get("check_result") else ("…" if t.get("asked_check_question") else "—")
+            rows_html.append(
+                "<tr>"
+                f"<td>{i}</td>"
+                f"<td><b>{escape(str(sc))}</b></td>"
+                f"<td><span class='pill-mini'>{escape(_strategy_label(t.get('teaching_strategy','')))}</span></td>"
+                f"<td>{escape(_band_label(t.get('scope_category','')))}</td>"
+                f"<td>{mcq}</td>"
+                "</tr>"
+            )
+        st.markdown(
+            f"""
+            <table class="turn-table">
+              <thead>
+                <tr><th>#</th><th>Hiểu</th><th>Chiến lược</th><th>Phạm vi</th><th>MCQ</th></tr>
+              </thead>
+              <tbody>{''.join(rows_html)}</tbody>
+            </table>
+            """,
+            unsafe_allow_html=True,
+        )
+        misc_n = sum(len(t.get("misconceptions") or []) for t in logs)
+        check_n = sum(1 for t in logs if t.get("asked_check_question"))
+        k1, k2 = st.columns(2)
+        k1.metric("Hiểu lầm", misc_n)
+        k2.metric("Lượt kiểm tra", f"{check_n}/{len(logs)}")
+    else:
+        st.caption("Biểu đồ và bảng lượt sẽ xuất hiện khi bạn bắt đầu hỏi.")
 
 st.divider()
 footer_left, footer_right = st.columns([3, 1])
@@ -377,15 +820,19 @@ with footer_left:
     with st.expander("VLearn Tutor có thể hỗ trợ gì?"):
         st.markdown(
             """
-            - Ước lượng **mức độ hiểu** và gợi ý **bước học tiếp theo**.
-            - Hỏi lại khi chưa đủ tín hiệu, không tự suy diễn hiểu lầm của bạn.
-            - Đây là công cụ hỗ trợ học tập, **không phải điểm số chính thức**.
+            - Hỏi trong khung chat · xem **ví dụ** (trong bài) / **take-note** (ngoài bài).
+            - Trả lời **câu kiểm tra** ngay dưới chat để cập nhật mức hiểu.
+            - Theo dõi **bảng đánh giá** bên phải (điểm, chiến lược, lịch sử lượt).
+            - Không phải điểm số chính thức của khoá.
             """
         )
 with footer_right:
     if st.button("↻  Bắt đầu lại", use_container_width=True):
         st.session_state.messages = []
         st.session_state.turn_logs = []
+        st.session_state.pending_check = None
+        st.session_state.latest_score = None
+        st.session_state.check_feedback = None
         st.rerun()
 
 # ---------------------------------------------------------------------------

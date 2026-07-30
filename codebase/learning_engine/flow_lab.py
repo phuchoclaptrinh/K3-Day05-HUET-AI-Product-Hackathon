@@ -18,7 +18,7 @@ from typing import Any
 
 from .pipeline import LearningEngine, TurnResult
 from .strategy import select_strategy
-from .followup import _template_followup
+from .followup import _template_check_question
 from .context import build_context
 from .estimator import EstimateResult
 from .response import _template_response
@@ -170,14 +170,16 @@ def _pack_local_from_golden(
     )
     strategy = select_strategy(score, confidence, misconceptions)
     ctx = build_context(question, history=[], topic_hint=topic_hint)
-    follow = _template_followup(
+    check_q = _template_check_question(
         ctx, strategy.teaching_strategy, misconceptions, score
     )
+    follow = check_q.prompt_text()
     response = _template_response(ctx, estimate, strategy, follow)
     return LearningEngine._pack(
         estimate,
         strategy,
         [follow],
+        check_q,
         response,
         "template",
         "template",

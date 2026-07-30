@@ -13,10 +13,24 @@ Chuyển AI Tutor từ **Answer Engine** → **Learning Engine**:
 ```
 Student Question → Generate Answer → Conversation Ends
                     ↓
-Student Message → Estimate Understanding → Detect Misconception
-               → Select Teaching Move → Ask Follow-up → Adaptive Response
+Student Message
+  → ScopeGuard (local) — ngoài phạm vi: từ chối, **không gọi API**
+  → Context Builder
+  → Understanding Estimator + Misconception
+  → Teaching Strategy Selector (rules)
+  → Example Illustrator (ví dụ minh họa)
+  → Follow-up MCQ Generator
+  → Response Generator (giảng + ví dụ + MCQ)
 ```
 
+### 2.0b Module mới (bổ sung CP4+)
+
+| Module | Loại | Việc |
+|---|---|---|
+| **Scope Guard** | Rule local + chỉ mục transcript | 3 mức: **in_lesson** (khớp transcript) · **related_external** (hơi liên quan → trả lời + take-note) · **refuse** (linh tinh, không gọi API) |
+| **Example Illustrator** | LLM + template fallback | 1 ví dụ (title / scenario / mapping / takeaway) gắn khái niệm đang hỏi; gắn vào response + panel |
+
+```
 Sau khi làm theo file này, nhóm có đủ: quyết định sản phẩm, kiến trúc module, thứ tự build, mốc CP1–CP6, eval/quality bar, skeleton chỗ khó, cấu trúc repo nộp.
 
 ---

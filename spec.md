@@ -82,7 +82,7 @@ Canvas CP1: [`docs/canvas-cp1.md`](docs/canvas-cp1.md) · Pipeline: [`docs/00-pi
   5. Không xử lý logistics Discord / deadline.
 
 - **Mức prototype nhắm tới:** [ ] Sketch  [ ] Mock  [x] Working  
-  - **Thật:** Understanding Estimator + Misconception (Gemini JSON), Follow-up Generator (Gemini), Tutor Response (Gemini), Strategy Selector (rules), UI Streamlit + Flow Lab + KPI session.  
+  - **Thật:** Understanding Estimator + Misconception (Gemini JSON), Follow-up Generator (Gemini), Tutor Response (Gemini), Strategy Selector (rules), **Scope Guard** (local, chặn ngoài phạm vi trước API), **Example Illustrator** (ví dụ minh họa), UI Streamlit + Flow Lab + KPI session.  
   - **Mock / fallback:** heuristic mock khi hết quota/lỗi API; Flow Lab HIT golden-set dùng fixture local (không gọi API); eval follow-up dùng template để tiết kiệm quota.
 
 - **Automation:** [ ] augment  [x] conditional  [ ] automate  
@@ -119,9 +119,9 @@ Canvas CP1: [`docs/canvas-cp1.md`](docs/canvas-cp1.md) · Pipeline: [`docs/00-pi
 | 2 | HV diễn đạt lại đúng khái niệm bằng lời mình | — | Score high, move check/next, follow-up ngắn | G2 |
 | 3 | Nhầm Stack/Queue trong câu khẳng định | ④ | Có misconception cụ thể, review_concept, follow-up phân biệt | G11 |
 | 4 | Hỏi lại cùng khái niệm nhiều lần | ① | Score thấp, reason nêu hỏi lặp, review + check | G11 |
-| 5 | Input ngắn (“hi”, “asds”) | ② | Không bịa misconception; hỏi lại 1 câu | G10 |
-| 6 | “làm hộ bài / cho đáp án quiz” | ③ | Từ chối làm hộ; gợi ý cách tự kiểm tra | G1 |
-| 7 | Giải mã base64 / ngoài học thuật | ③ | Từ chối ngoài phạm vi | G1 |
+| 5 | Input ngắn (“hi”, “asds”) | ② | Không bịa misconception; hỏi lại 1 câu / Scope Guard | G10 |
+| 6 | “làm hộ bài / cho đáp án quiz” | ③ | **Scope Guard** từ chối local, **không gọi API** ước lượng/dạy | G1 |
+| 7 | Giải mã base64 / ngoài học thuật | ③ | Scope Guard từ chối ngoài phạm vi (không gọi API) | G1 |
 | 8 | Estimator lệch band so với judge người (vd. G07) | ① | Ghi fail trong eval; UI vẫn cho bỏ qua follow-up | G8 |
 | 9 | Không có excerpt slide | ① | Ước lượng theo wording; không bịa trang; có thể dùng topic_hint | G2 |
 | 10 | Score cao sau 1 câu may rủi | ④ | Follow-up nhẹ xác nhận trước khi next_topic | G10 |
@@ -130,11 +130,11 @@ Canvas CP1: [`docs/canvas-cp1.md`](docs/canvas-cp1.md) · Pipeline: [`docs/00-pi
 
 ## §6. Bốn đường đi của trải nghiệm
 
-- **Happy path:** HV hỏi / tự diễn đạt khái niệm → hiện score + strategy + follow-up → tutor trả lời theo move và kết bằng câu hỏi kiểm tra.  
+- **Happy path:** HV hỏi khái niệm trong phạm vi → ví dụ minh họa + score + strategy + MCQ kiểm tra.  
 - **Low-confidence (②):** Xin tóm tắt / mơ hồ → confidence=low, không gán misconception, hỏi làm rõ (validate_understanding / check).  
 - **Failure / không căn cứ (①):** Thiếu tín hiệu hoặc lệch band → thu hẹp: không bịa misconception; log fail trong eval; user bỏ qua follow-up được.  
 - **Correction:** HV trả lời follow-up ở turn sau → Estimator cập nhật score/move theo tin mới.  
-- **Ngoài phạm vi (③):** Từ chối lịch sự + giữ trong phạm vi hỗ trợ học.  
+- **Ngoài phạm vi (③):** Scope Guard từ chối local (**skip API**) + gợi ý hỏi lại trong phạm vi khoá.  
 - **Đặc thù domain (④):** Phát hiện misconception cụ thể → review_concept + follow-up sửa chỗ sai (không để trống follow-up).
 
 Prototype: chat chính + panel signals + Flow Lab (trace cache → golden → API).
