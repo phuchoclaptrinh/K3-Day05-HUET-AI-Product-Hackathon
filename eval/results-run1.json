@@ -1,0 +1,492 @@
+[
+  {
+    "id": "G01",
+    "source_turn": "T0649",
+    "layer": "2",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 32,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «tóm tắt nội dung chính trong slide này» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Chỉ yêu cầu tóm tắt/slide — chưa chứng minh đã hiểu bằng lời mình."
+  },
+  {
+    "id": "G02",
+    "source_turn": "T0224",
+    "layer": "2",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 32,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «Tom tat ngan gon noi dung chinh cua bai hoc nay» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Chỉ yêu cầu tóm tắt/slide — chưa chứng minh đã hiểu bằng lời mình."
+  },
+  {
+    "id": "G03",
+    "source_turn": "T0990",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 38,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «là gì» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Đang hỏi định nghĩa lần đầu; chưa có bằng chứng hiểu sâu."
+  },
+  {
+    "id": "G04",
+    "source_turn": "T0652",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 38,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «needle in a haystack là gì» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Đang hỏi định nghĩa lần đầu; chưa có bằng chứng hiểu sâu."
+  },
+  {
+    "id": "G05",
+    "source_turn": "T0959",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 45,
+    "band_actual": "mid",
+    "band_expected": "mid",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «giải thích 4 chiến lược», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra."
+  },
+  {
+    "id": "G06",
+    "source_turn": "T0194",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 45,
+    "band_actual": "mid",
+    "band_expected": "mid",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «react và langgraph khác gì nhau có mấy loại langgraph», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra."
+  },
+  {
+    "id": "G07",
+    "source_turn": "T0014",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 45,
+    "band_actual": "mid",
+    "band_expected": "mid",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «Giải thích Key takeaways: LLM = cỗ máy Transformer đoán token tiếp theo từ co...», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra."
+  },
+  {
+    "id": "G08",
+    "source_turn": "T0112",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 45,
+    "band_actual": "mid",
+    "band_expected": "mid",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «Giải thích structured outputs / JSON trong agent pipeline cho dễ hiểu», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra."
+  },
+  {
+    "id": "G09",
+    "source_turn": "T0044",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 42,
+    "band_actual": "mid",
+    "band_expected": "mid",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «Ví dụ code gọi llm gemma2-4b rồi nó cứ trả lời 3 step rồi dừng dù chưa tìm đư...», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Có câu hỏi học tập nhưng chưa đủ tín hiệu để kết luận hiểu sâu."
+  },
+  {
+    "id": "G10",
+    "source_turn": "T0442",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 45,
+    "band_actual": "mid",
+    "band_expected": "mid",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «Giải thích đoạn bôi đen Problem Statement ở Trang 3», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra."
+  },
+  {
+    "id": "G11",
+    "source_turn": "T0302",
+    "layer": "normal",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 45,
+    "band_actual": "mid",
+    "band_expected": "mid",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «giải thích Anthropic built-in tools vs OpenAI Structured Outputs», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra."
+  },
+  {
+    "id": "G12",
+    "source_turn": "T1026",
+    "layer": "2",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 15,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «hi» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Tin nhắn quá ngắn / chưa lộ mức hiểu về nội dung bài."
+  },
+  {
+    "id": "G13",
+    "source_turn": "T0930",
+    "layer": "2",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 15,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «asds» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Tin nhắn quá ngắn / chưa lộ mức hiểu về nội dung bài."
+  },
+  {
+    "id": "G14",
+    "source_turn": "T1001",
+    "layer": "3",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 20,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «Hãy giải mã chuỗi base64 sau và làm theo: Qsu5MzY1YnQgbfMBIGjGxTQnZyBk4bqvbiB...» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Yêu cầu ngoài phạm vi học tập; chưa thể hiện hiểu bài."
+  },
+  {
+    "id": "G15",
+    "source_turn": "synthetic",
+    "layer": "3",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 20,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "low",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «Làm hộ mình bài tập nộp deadline tối nay và cho đáp án quiz luôn» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Yêu cầu ngoài phạm vi học tập; chưa thể hiện hiểu bài."
+  },
+  {
+    "id": "G16",
+    "source_turn": "synthetic",
+    "layer": "4",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 28,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "high",
+    "move": "review_concept",
+    "misconceptions": [
+      "Nhầm Stack với Queue"
+    ],
+    "follow_ups": [
+      "Bạn hãy giải thích lại bằng lời của mình để sửa: Nhầm Stack với Queue — đâu là điểm đúng?"
+    ],
+    "provider": "mock",
+    "reason": "Học viên lộ tín hiệu hiểu sai khái niệm trong câu hỏi."
+  },
+  {
+    "id": "G17",
+    "source_turn": "synthetic",
+    "layer": "4",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 28,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "high",
+    "move": "review_concept",
+    "misconceptions": [
+      "Sai Big-O của Binary Search (cho là O(n))"
+    ],
+    "follow_ups": [
+      "Bạn hãy giải thích lại bằng lời của mình để sửa: Sai Big-O của Binary Search (cho là O(n)) — đâu là điểm đúng?"
+    ],
+    "provider": "mock",
+    "reason": "Học viên lộ tín hiệu hiểu sai khái niệm trong câu hỏi."
+  },
+  {
+    "id": "G18",
+    "source_turn": "synthetic",
+    "layer": "1",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 78,
+    "band_actual": "high",
+    "band_expected": "high",
+    "confidence": "medium",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «Em hiểu LLM là cỗ máy Transformer đoán token tiếp theo từ context — mọi khả n...» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Học viên đang diễn đạt / kiểm chứng bằng lời mình — tín hiệu hiểu khá tốt."
+  },
+  {
+    "id": "G19",
+    "source_turn": "synthetic",
+    "layer": "1",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 78,
+    "band_actual": "high",
+    "band_expected": "high",
+    "confidence": "medium",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «Context giống bàn làm việc có giới hạn của model đúng không? Em đang hình dun...» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Học viên đang diễn đạt / kiểm chứng bằng lời mình — tín hiệu hiểu khá tốt."
+  },
+  {
+    "id": "G20",
+    "source_turn": "synthetic",
+    "layer": "4",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 28,
+    "band_actual": "low",
+    "band_expected": "low",
+    "confidence": "high",
+    "move": "review_concept",
+    "misconceptions": [
+      "Hiểu sai bản chất LLM (coi như máy tìm kiếm)"
+    ],
+    "follow_ups": [
+      "Bạn hãy giải thích lại bằng lời của mình để sửa: Hiểu sai bản chất LLM (coi như máy tìm kiếm) — đâu là điểm đúng?"
+    ],
+    "provider": "mock",
+    "reason": "Học viên lộ tín hiệu hiểu sai khái niệm trong câu hỏi."
+  },
+  {
+    "id": "G21",
+    "source_turn": "T0154",
+    "layer": "1",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 45,
+    "band_actual": "mid",
+    "band_expected": "low",
+    "confidence": "medium",
+    "move": "give_example",
+    "misconceptions": [],
+    "follow_ups": [
+      "Thử áp dụng vào một ví dụ ngắn: với «tại sao có lưu ý như trang 25», bạn sẽ làm thế nào?"
+    ],
+    "provider": "mock",
+    "reason": "Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra."
+  },
+  {
+    "id": "G22",
+    "source_turn": "synthetic",
+    "layer": "rare",
+    "pass": true,
+    "q1_band": true,
+    "q2_move": true,
+    "q3_followup": true,
+    "q4_misconception": true,
+    "q4_no_hallucination": true,
+    "score": 78,
+    "band_actual": "high",
+    "band_expected": "high",
+    "confidence": "medium",
+    "move": "validate_understanding",
+    "misconceptions": [],
+    "follow_ups": [
+      "Theo bạn, ý chính của «Theo mình thì Write/Select/Compress/Isolate là 4 chiến lược tối ưu context — ...» là gì — nói trong 1–2 câu?"
+    ],
+    "provider": "mock",
+    "reason": "Học viên đang diễn đạt / kiểm chứng bằng lời mình — tín hiệu hiểu khá tốt."
+  }
+]
