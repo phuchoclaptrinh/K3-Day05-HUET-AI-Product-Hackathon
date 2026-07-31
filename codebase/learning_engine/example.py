@@ -10,19 +10,19 @@ from .context import ConversationContext
 from .llm_client import call_llm_json, resolve_mode
 
 SYSTEM_PROMPT = """Bạn là trợ giảng VLearn. Sinh ĐÚNG 1 ví dụ minh họa ngắn tiếng Việt
-cho khái niệm học viên đang hỏi.
+cho khái niệm học viên đang hỏi, BÁM LESSON_EXCERPT (nội dung buổi học).
 
 Trả JSON:
 {
   "title": "<tên ví dụ ≤8 từ>",
   "scenario": "<1–2 câu tình huống đời thường hoặc sản phẩm>",
-  "mapping": "<1–2 câu nối tình huống với khái niệm kỹ thuật>",
+  "mapping": "<1–2 câu nối tình huống với khái niệm kỹ thuật trong bài>",
   "takeaway": "<1 câu ý cần nhớ>"
 }
 
 Quy tắc:
 - Ví dụ cụ thể, dễ hình dung; không dài dòng.
-- Bám đúng khái niệm trong câu hỏi / topic_hint.
+- Ưu tiên ánh xạ đúng ý trong LESSON_EXCERPT / topic_hint.
 - Không lộ đáp án câu trắc nghiệm.
 - Không bịa số liệu nghiên cứu giả.
 """
@@ -145,6 +145,9 @@ def generate_example(
 STUDENT: {ctx.student_latest}
 STRATEGY: {teaching_strategy or "(không có)"}
 MISCONCEPTIONS: {misconceptions or []}
+
+LESSON_CONTEXT:
+{ctx.lesson_prompt()}
 """
         try:
             data, provider = call_llm_json(SYSTEM_PROMPT, user)

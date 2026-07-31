@@ -83,17 +83,22 @@ def generate_tutor_response(
             system = (
                 "Bạn là AI Tutor VLearn trong lớp học. Giọng sư phạm, tiếng Việt, đúng cỡ.\n"
                 f"{external_flag}"
+                "Bạn ĐƯỢC cung cấp LESSON_EXCERPT (nội dung buổi học). "
+                "Giải thích bám excerpt + câu hỏi học viên; không bịa số trang ngoài excerpt.\n"
                 "CHỈ viết phần giảng dạy (2–5 câu) theo teaching_strategy.\n"
                 "CẤM viết câu hỏi cho học viên (cấm 'Theo bạn', 'Bạn hãy giải thích', "
                 "'tại sao bạn nghĩ', câu hỏi mở bất kỳ).\n"
                 "CẤM viết block 'Ví dụ minh họa', CẤM viết Take-note, CẤM viết đáp án A/B/C/D — "
                 "hệ thống sẽ gắn các block đó sau.\n"
-                "Không làm bài hộ. Không bịa số trang. Không chào dài."
+                "Không làm bài hộ. Không chào dài."
             )
             user = f"""STUDENT: {ctx.student_latest}
 TOPIC_HINT: {ctx.topic_hint or "(không có)"}
 HISTORY:
 {ctx.history_text() or "(trống)"}
+
+LESSON_CONTEXT:
+{ctx.lesson_prompt()}
 
 STRATEGY: {strategy.teaching_strategy}
 STRATEGY_GUIDE: {guide}

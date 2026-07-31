@@ -5,6 +5,7 @@ node_modules/
 codebase/.venv/
 codebase/.env
 codebase/.flow_cache.json
+codebase/.user_lessons/
 **/__pycache__/
 *.pyc
 scripts/_sample_out.json
