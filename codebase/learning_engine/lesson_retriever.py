@@ -63,12 +63,30 @@ def _tokens(text: str) -> set[str]:
         "này", "đó", "của", "và", "cho", "là", "có", "không", "rất", "cũng",
         "bạn", "mình", "chúng", "thì", "để", "từ", "hay", "về", "sau", "trước",
         "the", "and", "for", "with", "that", "this", "from",
+        # từ phổ biến dễ khớp nhầm slide (gây false in_lesson)
+        "cách", "cach", "làm", "lam", "dùng", "dung", "việc", "viec",
+        "nhóm", "nhom", "quản", "quan", "dự", "án", "du", "an",
+        "nội", "dung", "phần", "bài", "học", "hoc", "giúp", "giup",
+        "muốn", "muon", "cần", "can", "biết", "biet", "hiểu", "hieu",
+        "what", "how", "why", "can", "does", "about",
     }
     return {
         t
         for t in re.findall(r"[a-zà-ỹ0-9]{3,}", _norm(text))
         if t not in stop and not t.isdigit()
     }
+
+
+# Thuật ngữ ngắn vẫn mang nghĩa học thuật (không lọc theo độ dài)
+_SHORT_CONTENT = {
+    "llm", "rag", "mvp", "api", "rlhf", "odd", "hcd", "jtbd", "qkv", "moe",
+    "agent", "token", "prompt", "slide", "eval", "lora",
+}
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Token đủ 'nặng' để quyết phạm vi — tránh khớp nhầm từ chung."""
+    return {t for t in _tokens(text) if len(t) >= 5 or t in _SHORT_CONTENT}
 
 
 def _transcript_dir() -> Path | None:
@@ -222,26 +240,85 @@ def _chunks_from_markdown(
     return chunks
 
 
-def _score_chunk(chunk: LessonChunk, query_tokens: set[str], session_id: str) -> float:
+def _is_definition_query(text: str) -> bool:
+    return bool(
+        re.search(
+            r"là gì|la gi|what is|định nghĩa|dinh nghia|nghĩa là|nghia la",
+            text or "",
+            flags=re.I,
+        )
+    )
+
+
+def _is_agenda_or_toc(chunk: LessonChunk) -> bool:
+    """Trang mục lục / agenda — hay chứa keyword nhưng không giải thích."""
+    t = _norm(f"{chunk.heading} {chunk.text}")
+    if "agenda" in t or "mục lục" in t or "muc luc" in t:
+        return True
+    if t.count("•") >= 4 or t.count("·") >= 6:
+        return True
+    # Chuỗi bullet chủ đề ngắn (toc)
+    if len(re.findall(r"(?:^|\s)[•·\-]\s*\S+", chunk.text)) >= 5 and len(chunk.text) < 900:
+        return True
+    return False
+
+
+def _score_chunk(
+    chunk: LessonChunk,
+    query_tokens: set[str],
+    session_id: str,
+    query_text: str = "",
+) -> float:
     if not query_tokens:
         return 0.0
-    blob_tokens = _tokens(f"{chunk.heading} {chunk.text}")
+    blob = f"{chunk.heading} {chunk.text}"
+    blob_tokens = _tokens(blob)
     if not blob_tokens:
         return 0.0
     inter = query_tokens & blob_tokens
     if not inter:
-        # heading soft match
         htoks = _tokens(chunk.heading)
         inter = query_tokens & htoks
         if not inter:
             return 0.0
+
     score = len(inter) * 3.0 + sum(1.5 for t in inter if len(t) >= 6)
+    # Mật độ thuật ngữ query trong trang (tránh hòa điểm nhiều trang cùng nhắc 1 từ)
+    density = len(inter) / max(12, len(blob_tokens))
+    score += density * 55.0
+
     # Prefer selected session
     if session_id and chunk.session_id == session_id:
         score *= 1.35
     # Heading overlap boost
     if _tokens(chunk.heading) & query_tokens:
-        score *= 1.2
+        score *= 1.25
+
+    blob_n = _norm(blob)
+    q = query_text or ""
+    # Boost trang ĐỊNH NGHĨA / trả lời đúng kiểu "X là gì"
+    for t in inter:
+        if len(t) < 3:
+            continue
+        if f"{t} là gì" in blob_n or f"{t} la gi" in blob_n:
+            score += 28.0
+        if re.search(rf"\b{re.escape(t)}\s+(là|la)\s+(một|mot|an|a|the)\b", blob_n):
+            score += 16.0
+        if "large language model" in blob_n and t == "llm":
+            score += 14.0
+        if "mô hình ngôn ngữ" in blob_n and t == "llm":
+            score += 12.0
+
+    if _is_definition_query(q):
+        if re.search(r"là gì|la gi|định nghĩa|dinh nghia", blob_n):
+            score += 10.0
+        # Phạt trang agenda/toc khi đang hỏi định nghĩa
+        if _is_agenda_or_toc(chunk):
+            score *= 0.28
+        # Trang mở đầu / cover thường chỉ nhắc tên khoá
+        if re.search(r"trang\s*1\b", _norm(chunk.heading)) and len(inter) <= 1:
+            score *= 0.55
+
     return score
 
 
@@ -288,14 +365,14 @@ def retrieve_lesson_context(
     if not chunks:
         return LessonContext()
 
-    q_tokens = _tokens(f"{topic_hint} {student_message} {session_id}")
+    query_text = f"{topic_hint} {student_message}".strip()
+    q_tokens = _tokens(query_text)
     # Nếu chọn session nhưng query yếu — lấy vài heading đầu session làm grounding
     scored: list[tuple[float, LessonChunk]] = []
     for ch in chunks:
         if session_id and ch.session_id != session_id:
-            # vẫn cho phép nhẹ nếu không có session filter... skip other sessions when set
             continue
-        s = _score_chunk(ch, q_tokens, session_id)
+        s = _score_chunk(ch, q_tokens, session_id, query_text=query_text)
         if s > 0:
             scored.append((s, ch))
 
@@ -307,7 +384,7 @@ def retrieve_lesson_context(
     if not scored and not session_id:
         # Global fallback: best effort across all
         for ch in chunks:
-            s = _score_chunk(ch, q_tokens, "")
+            s = _score_chunk(ch, q_tokens, "", query_text=query_text)
             if s > 0:
                 scored.append((s, ch))
         scored.sort(key=lambda x: x[0], reverse=True)
