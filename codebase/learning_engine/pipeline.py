@@ -89,12 +89,7 @@ class LearningEngine:
         """session_id / slide_paste: ngữ cảnh bài học (transcript hoặc excerpt dán)."""
         sid = (session_id or day_code or "").strip()
 
-        # --- 0) Scope Guard ---
-        scope = check_scope(student_message, topic_hint, sid)
-        if enforce_scope and not scope.in_scope:
-            return self._out_of_scope_pack(scope)
-
-        # --- 1) Context + Lesson Retriever (đọc transcript/slide) ---
+        # --- 0) Context + Lesson Retriever trước — để Scope Guard biết slide PDF ---
         ctx = build_context(
             student_message,
             history,
@@ -103,6 +98,12 @@ class LearningEngine:
             session_id=sid,
             slide_paste=slide_paste,
         )
+
+        # --- 1) Scope Guard (có xét excerpt slide đã chọn) ---
+        scope = check_scope(student_message, topic_hint, sid, lesson=ctx.lesson)
+        if enforce_scope and not scope.in_scope:
+            return self._out_of_scope_pack(scope)
+
         take_note = _enrich_take_note(scope, ctx)
 
         estimate = estimate_understanding(ctx)
