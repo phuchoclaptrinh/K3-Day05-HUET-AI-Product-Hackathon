@@ -14,7 +14,6 @@ if str(ROOT) not in sys.path:
 
 from learning_engine.llm_client import resolve_mode  # noqa: E402
 from learning_engine.pipeline import LearningEngine  # noqa: E402
-from learning_engine.flow_lab import cache_stats, run_flow_lab  # noqa: E402
 from learning_engine.grading import grade_check_answer  # noqa: E402
 from learning_engine.followup import CheckQuestion  # noqa: E402
 from learning_engine.response import _mcq_block  # noqa: E402
@@ -128,14 +127,27 @@ def _score_tone(score: int) -> str:
     return "low"
 
 
-def _render_mcq_preview(check: dict) -> None:
-    """Chỉ xem trước phương án trong lịch sử chat (không chọn ở đây)."""
+def _render_mcq(
+    check: dict,
+    *,
+    active: bool,
+    last: dict | None,
+    widget_key: str,
+) -> None:
+    """Hiển thị câu trắc nghiệm và cho phép trả lời ngay trong tin nhắn Tutor."""
     opts = check.get("options") or {}
-    rows = "".join(
-        f'<div class="mcq-opt"><span class="mcq-key">{escape(k)}</span>'
-        f"<span>{escape(str(opts[k]))}</span></div>"
-        for k in ("A", "B", "C", "D")
-        if k in opts
+    rows = ""
+    if not active:
+        rows = "".join(
+            f'<div class="mcq-opt"><span class="mcq-key">{escape(k)}</span>'
+            f"<span>{escape(str(opts[k]))}</span></div>"
+            for k in ("A", "B", "C", "D")
+            if k in opts
+        )
+    hint = (
+        "Chọn đáp án và nộp ngay bên dưới câu hỏi."
+        if active
+        else "Câu hỏi này đã được trả lời hoặc bỏ qua."
     )
     st.markdown(
         f"""
@@ -143,12 +155,47 @@ def _render_mcq_preview(check: dict) -> None:
           <div class="mcq-card-label">Câu hỏi kiểm tra</div>
           <div class="mcq-q">{escape(check.get("question") or "")}</div>
           {rows}
-          <div class="mcq-hint">Trả lời ở khung bên dưới đoạn chat để cập nhật mức hiểu.</div>
+          <div class="mcq-hint">{hint}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    if not active:
+        return
 
+    option_labels = [
+        f"{key}. {value}" for key, value in sorted(opts.items())
+    ]
+    choice_label = st.radio(
+        "Chọn một đáp án",
+        options=option_labels,
+        index=None,
+        key=widget_key,
+    )
+    submit_col, skip_col = st.columns([1.2, 1])
+    with submit_col:
+        submit_mcq = st.button(
+            "Nộp đáp án",
+            use_container_width=True,
+            type="primary",
+            key=f"{widget_key}_submit",
+        )
+    with skip_col:
+        skip_mcq = st.button(
+            "Bỏ qua",
+            use_container_width=True,
+            key=f"{widget_key}_skip",
+        )
+
+    if submit_mcq and _handle_mcq_submit(check, choice_label, last):
+        st.rerun()
+    if skip_mcq:
+        st.session_state.pending_check = None
+        st.session_state.check_feedback = {
+            "skipped": True,
+            "feedback": "Đã bỏ qua câu trắc nghiệm.",
+        }
+        st.rerun()
 
 def _handle_mcq_submit(check: dict, choice_label: str | None, last: dict) -> bool:
     """Xử lý nộp MCQ. True nếu đã rerun."""
@@ -435,27 +482,6 @@ st.markdown(
       background: #f5f5f4; color: #44403c; font-size: .72rem; font-weight: 600;
     }
 
-    .flow-banner {
-      padding: .85rem 1rem; margin: .35rem 0 1rem; border-radius: 12px;
-      border: 1px solid #d6d3d1; background: #fafaf9; color: #44403c; font-size: .88rem;
-    }
-    .flow-step {
-      padding: .7rem .85rem; margin: .4rem 0; border: 1px solid var(--line);
-      border-radius: 11px; background: #fff;
-    }
-    .flow-step-title {
-      display: flex; justify-content: space-between; gap: .5rem;
-      margin-bottom: .25rem; font-weight: 700; font-size: .9rem;
-    }
-    .src-pill {
-      display: inline-block; padding: .12rem .42rem; border-radius: 999px;
-      font-size: .7rem; font-weight: 700; text-transform: uppercase;
-    }
-    .src-cache { background: #ecfdf5; color: #047857; }
-    .src-golden_set { background: #e0f2fe; color: #0369a1; }
-    .src-api { background: #fff7ed; color: #c2410c; }
-    .src-rule, .src-local, .src-template { background: #f5f5f4; color: #57534e; }
-    .flow-step-detail { color: var(--muted); font-size: .84rem; }
 
     .stButton > button {
       border-radius: 11px; border-color: #d6d3d1; color: #44403c; font-weight: 600;
@@ -544,6 +570,10 @@ with col_chat:
         unsafe_allow_html=True,
     )
 
+    check = st.session_state.pending_check
+    last = st.session_state.turn_logs[-1] if st.session_state.turn_logs else None
+    already_graded = bool(last and last.get("check_result"))
+
     with st.container(height=460, border=True):
         if not st.session_state.messages:
             st.markdown(
@@ -560,7 +590,7 @@ with col_chat:
                 unsafe_allow_html=True,
             )
 
-        for msg in st.session_state.messages:
+        for message_index, msg in enumerate(st.session_state.messages):
             avatar = "🧑‍🎓" if msg["role"] == "student" else "🤖"
             with st.chat_message(msg["role"], avatar=avatar):
                 if msg["role"] == "assistant" and msg.get("meta"):
@@ -591,7 +621,19 @@ with col_chat:
                         )
                     cq = m.get("check_question") or {}
                     if cq.get("options"):
-                        _render_mcq_preview(cq)
+                        active_check = bool(
+                            check
+                            and cq == check
+                            and last
+                            and message_index == len(st.session_state.messages) - 1
+                            and not already_graded
+                        )
+                        _render_mcq(
+                            cq,
+                            active=active_check,
+                            last=last,
+                            widget_key=f"mcq_radio_chat_{message_index}",
+                        )
                     score_show = m.get("understanding_score", "?")
                     st.caption(
                         f"{_band_label(band)} · hiểu {score_show}% · "
@@ -600,38 +642,7 @@ with col_chat:
                 else:
                     st.markdown(msg["content"])
 
-    # Dock trả lời MCQ — ngay dưới chat
-    check = st.session_state.pending_check
-    last = st.session_state.turn_logs[-1] if st.session_state.turn_logs else None
-    already_graded = bool(last and last.get("check_result"))
-    if check and check.get("options") and last and not already_graded:
-        with st.container(border=True):
-            st.markdown("#### Trả lời câu kiểm tra")
-            st.markdown(f"**{check.get('question') or ''}**")
-            option_labels = [
-                f"{k}. {v}" for k, v in sorted((check.get("options") or {}).items())
-            ]
-            choice_label = st.radio(
-                "Chọn một đáp án",
-                options=option_labels,
-                index=None,
-                key=f"mcq_radio_chat_{len(st.session_state.turn_logs)}",
-            )
-            g1, g2 = st.columns([1.2, 1])
-            with g1:
-                submit_mcq = st.button("Nộp đáp án", use_container_width=True, type="primary")
-            with g2:
-                skip_mcq = st.button("Bỏ qua", use_container_width=True)
-
-            if submit_mcq and _handle_mcq_submit(check, choice_label, last):
-                st.rerun()
-            if skip_mcq:
-                st.session_state.pending_check = None
-                st.session_state.check_feedback = {
-                    "skipped": True,
-                    "feedback": "Đã bỏ qua câu trắc nghiệm.",
-                }
-                st.rerun()
+        live_user_message = st.empty()
 
     if st.session_state.check_feedback and not st.session_state.check_feedback.get("skipped"):
         fb = st.session_state.check_feedback
@@ -643,6 +654,9 @@ with col_chat:
     prompt = st.chat_input("Hỏi khái niệm hoặc diễn đạt lại điều bạn vừa hiểu…")
     if prompt:
         st.session_state.messages.append({"role": "student", "content": prompt})
+        with live_user_message.container():
+            with st.chat_message("user", avatar="🧑‍🎓"):
+                st.markdown(prompt)
         history = [
             {"role": "student" if m["role"] == "student" else "tutor", "content": m["content"]}
             for m in st.session_state.messages[:-1]
@@ -746,7 +760,7 @@ with col_side:
 
             pending = st.session_state.pending_check
             if pending and pending.get("options") and not last.get("check_result"):
-                st.info("Có câu kiểm tra đang chờ — trả lời ở khung dưới chat.")
+                st.info("Có câu kiểm tra đang chờ — chọn đáp án ngay trong tin nhắn của Tutor.")
     else:
         st.markdown(
             """
@@ -821,7 +835,7 @@ with footer_left:
         st.markdown(
             """
             - Hỏi trong khung chat · xem **ví dụ** (trong bài) / **take-note** (ngoài bài).
-            - Trả lời **câu kiểm tra** ngay dưới chat để cập nhật mức hiểu.
+            - Trả lời **câu kiểm tra** ngay trong tin nhắn của Tutor để cập nhật mức hiểu.
             - Theo dõi **bảng đánh giá** bên phải (điểm, chiến lược, lịch sử lượt).
             - Không phải điểm số chính thức của khoá.
             """
@@ -834,130 +848,3 @@ with footer_right:
         st.session_state.latest_score = None
         st.session_state.check_feedback = None
         st.rerun()
-
-# ---------------------------------------------------------------------------
-# Flow Lab — panel kiểm tra luồng (local data trước, API sau)
-# ---------------------------------------------------------------------------
-st.divider()
-st.markdown(
-    '<div class="section-heading"><span>🧪</span> Flow Lab · Kiểm tra luồng</div>',
-    unsafe_allow_html=True,
-)
-st.markdown(
-    """
-    <div class="flow-banner">
-      Thứ tự khi chạy 1 câu hỏi test:
-      <b>1) Cache đĩa</b> → <b>2) Golden set</b> → <b>3) Gọi API Gemini</b> (chỉ khi miss).
-      Dùng để kiểm tra pipeline trước demo / khi muốn tiết kiệm quota.
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-if "flow_lab_result" not in st.session_state:
-    st.session_state.flow_lab_result = None
-
-lab_q_col, lab_opt_col = st.columns([2.2, 1], gap="large")
-with lab_q_col:
-    flow_question = st.text_area(
-        "Câu hỏi test",
-        height=100,
-        placeholder=(
-            "Dán câu hỏi học viên để xem hệ thống đọc dữ liệu nào…\n"
-            "Ví dụ: \"Context\" là gì"
-        ),
-        key="flow_lab_question",
-    )
-    flow_topic = st.text_input(
-        "Topic hint (tuỳ chọn)",
-        placeholder="Context window / Stack vs Queue…",
-        key="flow_lab_topic",
-    )
-with lab_opt_col:
-    st.caption("Tuỳ chọn chạy")
-    force_api = st.checkbox("Bỏ qua local · force gọi API", value=False)
-    stats = cache_stats()
-    st.metric("Cache entries", stats.get("total", 0))
-    st.caption(
-        f"api={stats.get('api', 0)} · golden={stats.get('golden_set', 0)}"
-    )
-    run_lab = st.button("▶ Chạy kiểm tra luồng", use_container_width=True, type="primary")
-    clear_lab = st.button("Xoá kết quả panel", use_container_width=True)
-
-if clear_lab:
-    st.session_state.flow_lab_result = None
-    st.rerun()
-
-if run_lab:
-    if not flow_question.strip():
-        st.warning("Nhập câu hỏi test trước khi chạy.")
-    else:
-        with st.spinner("Đang lookup cache / golden-set / API…"):
-            lab = run_flow_lab(
-                flow_question.strip(),
-                topic_hint=flow_topic.strip(),
-                force_api=force_api,
-            )
-        st.session_state.flow_lab_result = lab.to_dict()
-        st.rerun()
-
-lab = st.session_state.flow_lab_result
-if lab:
-    source = lab["overall_source"]
-    api_flag = "Có gọi API" if lab["api_called"] else "Không gọi API"
-    matched = lab.get("matched_case_id") or "—"
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Nguồn tổng", source)
-    m2.metric("API", api_flag)
-    m3.metric("Case khớp", matched)
-
-    st.markdown("#### Trace từng bước")
-    for step in lab["steps"]:
-        src = step.get("source", "local")
-        css = {
-            "cache": "src-cache",
-            "golden_set": "src-golden_set",
-            "api": "src-api",
-            "rule": "src-rule",
-            "template": "src-template",
-            "local": "src-local",
-        }.get(src, "src-local")
-        st.markdown(
-            f"""
-            <div class="flow-step">
-              <div class="flow-step-title">
-                <span>{escape(step.get("step", ""))}</span>
-                <span class="src-pill {css}">{escape(src)}</span>
-              </div>
-              <div class="flow-step-detail">{escape(step.get("detail", ""))}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        data = step.get("data") or {}
-        if data:
-            with st.expander(f"Chi tiết · {step.get('step', '')}", expanded=False):
-                st.json(data)
-
-    result = lab.get("result") or {}
-    if result:
-        st.markdown("#### Output pipeline")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Understanding", f"{result.get('understanding_score', '—')}%")
-        c2.metric("Strategy", result.get("teaching_strategy", "—"))
-        c3.metric(
-            "Providers",
-            f"{result.get('provider_estimate')}/{result.get('provider_followup')}/{result.get('provider_response')}",
-        )
-        st.markdown("**Follow-up**")
-        follows = result.get("follow_ups") or []
-        st.info(follows[0] if follows else "—")
-        st.markdown("**Tutor response**")
-        st.write(result.get("tutor_response") or "—")
-        with st.expander("JSON đầy đủ"):
-            st.json(result)
-else:
-    st.caption(
-        "Chưa có lần chạy Flow Lab. Thử dán một câu từ golden set "
-        "(vd. `\"Context\" là gì`) để thấy HIT local, hoặc câu mới để gọi API."
-    )
