@@ -3,13 +3,29 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .context import build_context
+from .context import ConversationContext, build_context
 from .estimator import EstimateResult, estimate_understanding
 from .example import ExampleIllustration, generate_example
 from .followup import CheckQuestion, generate_followup, _template_check_question
 from .response import generate_tutor_response
-from .scope_guard import ScopeDecision, check_scope
+from .scope_guard import ScopeDecision, TAKE_NOTE_EXTERNAL, check_scope
 from .strategy import StrategyResult, select_strategy
+
+
+def _enrich_take_note(scope: ScopeDecision, ctx: ConversationContext) -> str:
+    """Take-note ngoài bài: nêu rõ buổi học đang bám + heading liên quan."""
+    if scope.category != "related_external":
+        return scope.take_note
+    heads = ", ".join(ctx.lesson.headings[:2]) if ctx.lesson.headings else ""
+    session = ctx.lesson.session_label or "transcript khoá"
+    extra = (
+        f" Buổi đang tham chiếu: «{session}»"
+        + (f" · mục gần nhất: {heads}." if heads else ".")
+    )
+    base = scope.take_note or TAKE_NOTE_EXTERNAL
+    if "Buổi đang tham chiếu" in base:
+        return base
+    return base.rstrip() + extra
 
 
 @dataclass
@@ -31,7 +47,7 @@ class TurnResult:
     provider_estimate: str
     provider_followup: str
     provider_response: str
-    # Scope + example (pipeline mở rộng)
+    # Scope + example
     in_scope: bool = True
     scope_category: str = "in_lesson"
     scope_reason: str = ""
@@ -42,6 +58,15 @@ class TurnResult:
     example: dict[str, Any] | None = None
     provider_example: str = "skipped"
     api_calls_skipped: bool = False
+    # Lesson / slide context
+    lesson_session: str = ""
+    lesson_headings: list[str] = field(default_factory=list)
+    lesson_sources: list[str] = field(default_factory=list)
+    lesson_excerpt_preview: str = ""
+    lesson_overlap_ratio: float = 0.0
+    # Understanding matrix (4 trục + comment)
+    understanding_matrix: dict[str, Any] = field(default_factory=dict)
+    matrix_comment: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -54,23 +79,32 @@ class LearningEngine:
         history: list[dict[str, str]] | None = None,
         topic_hint: str = "",
         day_code: str = "",
+        session_id: str = "",
+        slide_paste: str = "",
         generate_response: bool = True,
         generate_followup_llm: bool = True,
         generate_example_llm: bool = True,
         enforce_scope: bool = True,
     ) -> TurnResult:
-        """generate_response=False bỏ qua call sinh câu trả lời (tiết kiệm quota khi eval).
+        """session_id / slide_paste: ngữ cảnh bài học (transcript hoặc excerpt dán)."""
+        sid = (session_id or day_code or "").strip()
 
-        generate_followup_llm=False buộc dùng template MCQ (eval Q3 vẫn ổn, đỡ tốn quota).
-        generate_example_llm=False buộc template ví dụ (hoặc bỏ ví dụ khi không generate_response).
-        enforce_scope=False bỏ cổng phạm vi (dùng cho eval golden cũ nếu cần).
-        """
-        # --- 0) Scope Guard (local) — chặn trước mọi API ---
-        scope = check_scope(student_message, topic_hint, day_code)
+        # --- 0) Scope Guard ---
+        scope = check_scope(student_message, topic_hint, sid)
         if enforce_scope and not scope.in_scope:
             return self._out_of_scope_pack(scope)
 
-        ctx = build_context(student_message, history, topic_hint, day_code)
+        # --- 1) Context + Lesson Retriever (đọc transcript/slide) ---
+        ctx = build_context(
+            student_message,
+            history,
+            topic_hint,
+            day_code=sid,
+            session_id=sid,
+            slide_paste=slide_paste,
+        )
+        take_note = _enrich_take_note(scope, ctx)
+
         estimate = estimate_understanding(ctx)
         strategy = select_strategy(
             estimate.understanding_score,
@@ -78,13 +112,9 @@ class LearningEngine:
             estimate.misconceptions,
         )
 
-        # --- Example Illustrator: CHỈ khi trong bài (transcript) ---
         example: ExampleIllustration | None = None
         provider_example = "skipped"
-        if (
-            generate_response
-            and scope.category == "in_lesson"
-        ):
+        if generate_response and scope.category == "in_lesson":
             example = generate_example(
                 ctx,
                 misconceptions=estimate.misconceptions,
@@ -92,7 +122,6 @@ class LearningEngine:
                 use_llm=generate_example_llm,
             )
             provider_example = example.provider
-        # related_external: có take-note, không sinh ví dụ minh họa bài học
 
         if generate_followup_llm:
             follow_ups, provider_followup, check_q = generate_followup(
@@ -121,10 +150,13 @@ class LearningEngine:
                 follow_ups,
                 check_question=check_q,
                 example=example,
-                take_note=scope.take_note,
+                take_note=take_note,
             )
         else:
             tutor_response, provider_response = "", "skipped"
+
+        # Gắn take_note đã enrich vào scope để UI đọc
+        scope.take_note = take_note
 
         return self._pack(
             estimate,
@@ -137,6 +169,7 @@ class LearningEngine:
             scope=scope,
             example=example,
             provider_example=provider_example,
+            ctx=ctx,
         )
 
     @staticmethod
@@ -183,6 +216,7 @@ class LearningEngine:
         scope: ScopeDecision | None = None,
         example: ExampleIllustration | None = None,
         provider_example: str = "skipped",
+        ctx: ConversationContext | None = None,
     ) -> TurnResult:
         scope = scope or ScopeDecision(
             in_scope=True,
@@ -190,6 +224,10 @@ class LearningEngine:
             matched_terms=[],
             category="in_lesson",
         )
+        lesson = ctx.lesson if ctx else None
+        preview = ""
+        if lesson and lesson.excerpt:
+            preview = lesson.excerpt[:420] + ("…" if len(lesson.excerpt) > 420 else "")
         return TurnResult(
             understanding_score=estimate.understanding_score,
             understanding_reason=estimate.understanding_reason,
@@ -218,4 +256,11 @@ class LearningEngine:
             example=example.to_dict() if example else None,
             provider_example=provider_example,
             api_calls_skipped=False,
+            lesson_session=(lesson.session_label if lesson else "") or "",
+            lesson_headings=list(lesson.headings) if lesson else [],
+            lesson_sources=list(lesson.sources) if lesson else [],
+            lesson_excerpt_preview=preview,
+            lesson_overlap_ratio=float(lesson.overlap_ratio) if lesson else 0.0,
+            understanding_matrix=estimate.matrix_dict(),
+            matrix_comment=estimate.matrix_comment or "",
         )

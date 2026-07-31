@@ -18,6 +18,12 @@ from learning_engine.grading import grade_check_answer  # noqa: E402
 from learning_engine.followup import CheckQuestion  # noqa: E402
 from learning_engine.response import _mcq_block  # noqa: E402
 from learning_engine.example import ExampleIllustration  # noqa: E402
+from learning_engine.lesson_retriever import list_sessions, retrieve_lesson_context  # noqa: E402
+from learning_engine.slide_ingest import (  # noqa: E402
+    delete_uploaded_lesson,
+    ingest_pdf_slide,
+    list_uploaded_sessions,
+)
 
 
 def _fresh_engine() -> LearningEngine:
@@ -241,6 +247,8 @@ def _eval_board_html(
     reason: str,
     misconceptions: list,
     initial_score: int | None = None,
+    matrix: dict | None = None,
+    matrix_comment: str = "",
 ) -> str:
     tone = _score_tone(score)
     conf_vi = {"low": "Thấp", "medium": "Trung bình", "high": "Cao"}.get(confidence, confidence)
@@ -256,6 +264,44 @@ def _eval_board_html(
         delta = (
             f"<div class='eval-delta'>Sau MCQ: {initial_score}% → <b>{score}%</b></div>"
         )
+
+    matrix_html = ""
+    m = matrix or {}
+    if m:
+        axes = [
+            ("evidence", "Bằng chứng tự hiểu", int(m.get("evidence") or 0)),
+            ("lesson_grounding", "Bám slide / bài", int(m.get("lesson_grounding") or 0)),
+            ("authenticity", "Không dán nguyên văn", int(m.get("authenticity") or 0)),
+            ("concept_accuracy", "Đúng khái niệm bài", int(m.get("concept_accuracy") or 0)),
+        ]
+        rows = []
+        for key, label, val in axes:
+            v = max(0, min(100, val))
+            tone_ax = _score_tone(v)
+            paste_tag = ""
+            if key == "authenticity" and m.get("paste_detected"):
+                paste_tag = " <em class='paste-flag'>· dán slide</em>"
+            rows.append(
+                f"<div class='mx-row'>"
+                f"<div class='mx-label'>{escape(label)}{paste_tag}</div>"
+                f"<div class='mx-track'><div class='mx-fill score-{tone_ax}' style='width:{v}%'></div></div>"
+                f"<div class='mx-val'>{v}</div>"
+                f"</div>"
+            )
+        if matrix_comment:
+            comment = escape(matrix_comment)
+        elif m.get("notes"):
+            comment = escape(str(m["notes"][0]))
+        else:
+            comment = "—"
+        matrix_html = (
+            "<div class='eval-matrix'>"
+            "<span class='signal-label'>Matrix đánh giá (có ngữ cảnh slide)</span>"
+            + "".join(rows)
+            + f"<div class='mx-note'>{comment}</div>"
+            "</div>"
+        )
+
     return f"""
     <div class="eval-board">
       <div class="eval-top">
@@ -271,6 +317,7 @@ def _eval_board_html(
       </div>
       <div class="score-bar"><div class="score-fill score-{tone}" style="width:{max(4, min(100, score))}%"></div></div>
       {delta}
+      {matrix_html}
       <div class="eval-reason">
         <span class="signal-label">Vì sao đánh giá vậy?</span>
         {escape(reason or "—")}
@@ -451,6 +498,26 @@ st.markdown(
       padding: .65rem .7rem; margin-top: .4rem; border-radius: 12px;
       background: #fafaf9; border: 1px solid var(--line); color: #44403c; font-size: .88rem;
     }
+    .eval-matrix {
+      margin-top: .7rem; padding: .55rem .65rem .45rem;
+      background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px;
+    }
+    .mx-row {
+      display: grid; grid-template-columns: 1.35fr 1.6fr 36px;
+      gap: .4rem; align-items: center; margin: .28rem 0;
+      font-size: .78rem; color: var(--ink);
+    }
+    .mx-label { color: var(--muted); }
+    .mx-track {
+      height: 7px; background: #e7e5e4; border-radius: 99px; overflow: hidden;
+    }
+    .mx-fill { height: 100%; border-radius: 99px; }
+    .mx-fill.score-high { background: var(--teal); }
+    .mx-fill.score-mid { background: var(--amber); }
+    .mx-fill.score-low { background: var(--rose); }
+    .mx-val { text-align: right; font-weight: 700; font-size: .78rem; }
+    .mx-note { margin-top: .35rem; font-size: .78rem; color: var(--muted); line-height: 1.35; }
+    .paste-flag { color: var(--rose); font-style: normal; font-weight: 600; }
     .eval-ok { color: var(--teal); font-weight: 600; font-size: .88rem; }
     .eval-misc { margin: .2rem 0 0; padding-left: 1.1rem; color: var(--rose); }
     .signal-card {
@@ -552,19 +619,196 @@ with col_chat:
         unsafe_allow_html=True,
     )
     topic_hint = st.text_input(
-        "Ngữ cảnh bài học",
+        "Ngữ cảnh khái niệm (tuỳ chọn)",
         value=st.session_state.get("topic_hint", ""),
         placeholder="Ví dụ: Context window · Transformer · Problem Statement",
-        help="Giúp khớp transcript. Ngoài bài vẫn trả lời kèm take-note; linh tinh sẽ từ chối.",
+        help="Bổ sung từ khoá; hệ thống sẽ retrieve đoạn transcript/slide liên quan.",
         key="topic_hint",
     )
+
+    with st.expander("📥 Nhập slide PDF → thêm vào danh sách buổi học", expanded=False):
+        st.caption(
+            "Upload PDF slide (có chữ). Hệ thống trích text theo trang, lưu thành buổi học "
+            "để chọn bên dưới. PDF scan ảnh thuần có thể không đọc được."
+        )
+        up_name = st.text_input(
+            "Tên buổi học (tuỳ chọn)",
+            placeholder="VD: Day 3 — Prompting & Agent",
+            key="pdf_lesson_label",
+        )
+        uploaded = st.file_uploader(
+            "Chọn file PDF",
+            type=["pdf"],
+            key="pdf_slide_uploader",
+            accept_multiple_files=False,
+        )
+        u1, u2 = st.columns(2)
+        with u1:
+            do_ingest = st.button("Học từ PDF & thêm buổi", use_container_width=True, type="primary")
+        with u2:
+            refresh_list = st.button("Làm mới danh sách", use_container_width=True)
+
+        if refresh_list:
+            st.rerun()
+
+        if do_ingest:
+            if not uploaded:
+                st.warning("Hãy chọn một file PDF trước.")
+            else:
+                try:
+                    meta = ingest_pdf_slide(
+                        filename=uploaded.name,
+                        data=uploaded.getvalue(),
+                        label=up_name.strip(),
+                    )
+                    # Option unique trong dropdown (label + đuôi id)
+                    st.session_state["lesson_session_label"] = (
+                        f"{meta['label']}  ·  {meta['id'][-6:]}"
+                    )
+                    st.success(
+                        f"Đã thêm buổi «{meta['label']}» "
+                        f"({meta.get('page_count', '?')} trang). "
+                        "Chọn bài học ở khung bên dưới để tutor dùng context slide này."
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Không ingest được PDF: {exc}")
+
+        uploaded_sessions = list_uploaded_sessions()
+        if uploaded_sessions:
+            st.caption(f"Đã học {len(uploaded_sessions)} slide PDF trên máy này.")
+            del_options = ["(không xoá)"] + [
+                f"{s['label']}  ·  {s['id'][-6:]}" for s in uploaded_sessions
+            ]
+            del_choice = st.selectbox(
+                "Xoá buổi PDF (tuỳ chọn)",
+                options=del_options,
+                key="pdf_delete_label",
+            )
+            if st.button("Xoá buổi PDF đã chọn") and del_choice != "(không xoá)":
+                lid = next(
+                    (
+                        s["id"]
+                        for s in uploaded_sessions
+                        if f"{s['label']}  ·  {s['id'][-6:]}" == del_choice
+                    ),
+                    "",
+                )
+                if lid and delete_uploaded_lesson(lid):
+                    st.success(f"Đã xoá {del_choice}")
+                    st.rerun()
+
+    # --- Chọn bài học từ context đã học ---
+    from learning_engine.lesson_retriever import clear_lesson_cache
+
+    clear_lesson_cache()
+    uploaded_now = list_uploaded_sessions()
+    catalog = list_sessions()
+    # PDF: lấy trực tiếp từ index (không phụ thuộc cache list_sessions)
+    learned_pdf = []
+    for s in uploaded_now:
+        item = dict(s)
+        item["display"] = f"{item['label']}  ·  {item['id'][-6:]}"
+        learned_pdf.append(item)
+    built_in = [s for s in catalog if s.get("source") != "pdf"]
+
+    session_labels = ["(Tự chọn theo câu hỏi)"]
+    id_by_label: dict[str, str] = {}
+    for s in learned_pdf:
+        disp = s["display"]
+        session_labels.append(disp)
+        id_by_label[disp] = s["id"]
+    for s in built_in:
+        disp = s.get("display") or s["label"]
+        session_labels.append(disp)
+        id_by_label[disp] = s["id"]
+
+    cur_label = st.session_state.get("lesson_session_label")
+    if cur_label not in session_labels:
+        mapped = next(
+            (
+                s["display"]
+                for s in learned_pdf
+                if s.get("label") == cur_label
+                or str(cur_label or "").startswith(str(s.get("label") or "___"))
+            ),
+            None,
+        )
+        st.session_state["lesson_session_label"] = mapped or session_labels[0]
+
+    # Đổi key khi số PDF đổi → Streamlit không giữ options cũ
+    select_key = f"lesson_session_label_v2_{len(learned_pdf)}_{uploaded_now[0]['id'][-6:] if uploaded_now else 'none'}"
+    # Đồng bộ giá trị sang key động
+    if select_key not in st.session_state:
+        st.session_state[select_key] = st.session_state.get(
+            "lesson_session_label", session_labels[0]
+        )
+        if st.session_state[select_key] not in session_labels:
+            st.session_state[select_key] = session_labels[0]
+
+    with st.container(border=True):
+        st.markdown("**Chọn bài học (context slide đã học)**")
+        if learned_pdf:
+            st.success(
+                f"Có **{len(learned_pdf)}** slide PDF đã học — chọn ở dưới "
+                f"(vd. `{learned_pdf[0]['display']}`)."
+            )
+            # Nút chọn nhanh từng PDF (không phụ thuộc selectbox cũ)
+            cols = st.columns(min(3, len(learned_pdf)))
+            for i, s in enumerate(learned_pdf[:6]):
+                with cols[i % len(cols)]:
+                    if st.button(
+                        s["display"],
+                        key=f"pick_pdf_{s['id']}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["lesson_session_label"] = s["display"]
+                        st.session_state[select_key] = s["display"]
+                        st.rerun()
+        else:
+            st.warning("Chưa có slide PDF nào. Upload ở khung trên rồi bấm «Học từ PDF».")
+
+        st.caption("Hoặc chọn trong danh sách đầy đủ (PDF + transcript):")
+        session_choice = st.selectbox(
+            "Bài học / slide nguồn",
+            options=session_labels,
+            help="Slide PDF đã học nằm đầu danh sách.",
+            key=select_key,
+            label_visibility="collapsed",
+        )
+        st.session_state["lesson_session_label"] = session_choice
+        session_id = id_by_label.get(session_choice, "")
+
+        if session_id:
+            preview = retrieve_lesson_context(
+                student_message=topic_hint.strip() or session_choice,
+                topic_hint=topic_hint.strip(),
+                session_id=session_id,
+                top_k=3,
+            )
+            src_tag = "PDF đã học" if session_id.startswith("pdf_") else "Transcript khoá"
+            heads = preview.headings[:4] or ["(đang nạp mục…)"]
+            st.markdown(
+                f"""
+                <div class="signal-card">
+                  <span class="signal-label">Context đang dùng · {escape(src_tag)}</span>
+                  <b>{escape(preview.session_label or session_choice)}</b><br/>
+                  <span style="color:#78716c;font-size:.82rem">
+                    Mục: {escape(" · ".join(heads))}
+                  </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("Chưa chọn buổi — hệ thống sẽ tự khớp theo câu hỏi.")
+
+    slide_paste = ""
     st.markdown(
         """
         <div class="topic-chip-row">
-          <span class="topic-chip">Gợi ý: Transformer</span>
-          <span class="topic-chip">RAG</span>
-          <span class="topic-chip">Double Diamond</span>
-          <span class="topic-chip">Context window</span>
+          <span class="topic-chip">Upload PDF → chọn bài học</span>
+          <span class="topic-chip">context từ slide đã học</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -668,6 +912,8 @@ with col_chat:
                     prompt,
                     history=history,
                     topic_hint=topic_hint.strip(),
+                    session_id=session_id,
+                    slide_paste=(slide_paste or "").strip(),
                 )
             except Exception as exc:
                 st.session_state.messages.append(
@@ -741,9 +987,29 @@ with col_side:
                     last.get("understanding_reason", ""),
                     list(last.get("misconceptions") or []),
                     initial_score=pre_mcq,
+                    matrix=last.get("understanding_matrix") or {},
+                    matrix_comment=str(last.get("matrix_comment") or ""),
                 ),
                 unsafe_allow_html=True,
             )
+
+            if last.get("lesson_excerpt_preview"):
+                heads = " · ".join(last.get("lesson_headings") or [])
+                st.markdown(
+                    f"""
+                    <div class="signal-card">
+                      <span class="signal-label">Ngữ cảnh bài học đã đọc</span>
+                      <b>{escape(last.get("lesson_session") or "Transcript")}</b><br/>
+                      <span style="color:#78716c;font-size:.8rem">{escape(heads)}</span><br/><br/>
+                      {escape(last.get("lesson_excerpt_preview") or "")}<br/>
+                      <span style="color:#78716c;font-size:.78rem">
+                        overlap dán slide: {last.get("lesson_overlap_ratio", 0)}
+                        · nguồn: {escape(", ".join(last.get("lesson_sources") or []) or "—")}
+                      </span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
             ex = last.get("example")
             if ex and last.get("scope_category") == "in_lesson":
@@ -834,9 +1100,9 @@ with footer_left:
     with st.expander("VLearn Tutor có thể hỗ trợ gì?"):
         st.markdown(
             """
-            - Hỏi trong khung chat · xem **ví dụ** (trong bài) / **take-note** (ngoài bài).
-            - Trả lời **câu kiểm tra** ngay trong tin nhắn của Tutor để cập nhật mức hiểu.
-            - Theo dõi **bảng đánh giá** bên phải (điểm, chiến lược, lịch sử lượt).
+            - Chọn **buổi học** (hoặc dán excerpt slide) để tutor đọc ngữ cảnh bài.
+            - Hỏi trong chat · xem **ví dụ** (trong bài) / **take-note** (ngoài bài).
+            - Trả lời **câu kiểm tra** để cập nhật mức hiểu trên bảng đánh giá.
             - Không phải điểm số chính thức của khoá.
             """
         )

@@ -27,8 +27,10 @@ Student Message
 
 | Module | Loại | Việc |
 |---|---|---|
-| **Scope Guard** | Rule local + chỉ mục transcript | 3 mức: **in_lesson** (khớp transcript) · **related_external** (hơi liên quan → trả lời + take-note) · **refuse** (linh tinh, không gọi API) |
-| **Example Illustrator** | LLM + template fallback | 1 ví dụ (title / scenario / mapping / takeaway) gắn khái niệm đang hỏi; gắn vào response + panel |
+| **Scope Guard** | Rule local + chỉ mục transcript | 3 mức: **in_lesson** · **related_external** (take-note) · **refuse** |
+| **Lesson Retriever** | Local retrieve từ transcript **+ PDF upload** | Lấy excerpt buổi học → Estimator / MCQ / Response / Example |
+| **Slide PDF Ingest** | `pypdf` → `.user_lessons/` | Upload PDF → trích text theo trang → thêm vào dropdown buổi học |
+| **Example Illustrator** | LLM + template fallback | 1 ví dụ chỉ khi **in_lesson**; bám excerpt |
 
 ```
 Sau khi làm theo file này, nhóm có đủ: quyết định sản phẩm, kiến trúc module, thứ tự build, mốc CP1–CP6, eval/quality bar, skeleton chỗ khó, cấu trúc repo nộp.

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from .context import ConversationContext
 from .llm_client import call_llm_json, resolve_mode
+from .understanding_matrix import (
+    UnderstandingMatrix,
+    apply_matrix_guards,
+    compute_understanding_matrix,
+    matrix_prompt_block,
+)
 
 Confidence = Literal["low", "medium", "high"]
 
@@ -14,40 +20,51 @@ Nhiệm vụ: ước lượng MỨC HIỂU của học viên và phát hiện mi
 KHÔNG chấm chất lượng câu trả lời của tutor.
 KHÔNG bịa bằng chứng không có trong hội thoại.
 
+Bạn ĐƯỢC CUNG CẤP:
+1) LESSON_EXCERPT — nội dung slide/transcript buổi học đã retrieve
+2) UNDERSTANDING_MATRIX — baseline 4 trục đã tính từ tin nhắn + excerpt
+
+## Ma trận 4 trục (phải neo điểm theo đây)
+- evidence: học viên có CHỨNG MINH được mình hiểu bằng lời mình không?
+- lesson_grounding: tin nhắn có bám khái niệm trong LESSON_EXCERPT không?
+- authenticity: có phải DÁN LẠI slide/excerpt không? (PASTE_DETECTED → luôn low)
+- concept_accuracy: có KHẲNG ĐỊNH sai so với đúng ý trong excerpt không?
+
+understanding_score hợp thành chủ yếu từ evidence; các trục còn lại dùng để
+trần điểm / hạ confidence — KHÔNG tăng điểm chỉ vì câu hỏi “khó” hoặc đúng bài.
+
 Trả về JSON đúng schema:
 {
   "understanding_score": <int 0-100>,
-  "understanding_reason": "<≤2 câu tiếng Việt>",
+  "understanding_reason": "<≤2 câu tiếng Việt; nêu rõ liên hệ với slide nếu có>",
   "confidence": "low|medium|high",
-  "misconceptions": ["<hiểu lầm cụ thể>", ...]
+  "misconceptions": ["<hiểu lầm cụ thể>", ...],
+  "matrix_comment": "<≤1 câu: trục nào quyết định điểm lần này>"
 }
 
-## Cách cho điểm — chấm theo BẰNG CHỨNG HIỂU, không theo độ khó câu hỏi
-- 0-39: học viên CHƯA có bằng chứng hiểu. Gồm: xin tóm tắt, xin giải thích, hỏi định nghĩa,
-  DÁN LẠI nguyên văn đoạn slide rồi nhờ giải thích, greeting, tin nhắn vô nghĩa,
-  yêu cầu ngoài phạm vi học tập, hoặc phát biểu sai kiến thức.
-- 40-70: bằng chứng MỘT PHẦN. Học viên mô tả tình huống cụ thể của mình, dùng đúng một phần
-  thuật ngữ, hoặc nêu hiểu biết còn thiếu.
-- 71-100: học viên CHỨNG MINH được hiểu: diễn đạt lại khái niệm bằng lời của mình,
-  so sánh có nội dung, hoặc kiểm chứng lại một phát biểu đúng.
+## Band bằng chứng (evidence) — KHÔNG theo độ khó câu hỏi
+- 0-39: chưa có bằng chứng hiểu. Xin tóm tắt / hỏi định nghĩa / dán slide /
+  greeting / ngoài phạm vi / phát biểu sai.
+- 40-70: bằng chứng một phần — mô tả tình huống, dùng đúng một phần thuật ngữ bài.
+- 71-100: tự diễn đạt khái niệm trong excerpt bằng lời mình, so sánh có nội dung,
+  hoặc kiểm chứng phát biểu đúng với bài.
 
-Quan trọng: câu hỏi càng khó KHÔNG làm điểm cao hơn. Dán một đoạn slide phức tạp và nói
-"giải thích giúp em" vẫn thuộc 0-39, vì học viên chưa đóng góp bằng chứng hiểu nào.
+Quan trọng:
+- PASTE_DETECTED hoặc authenticity thấp → score 0-39, confidence=low, misconceptions=[]
+- Hỏi đúng khái niệm trong slide nhưng chỉ “là gì / giải thích giúp” → vẫn 0-39
+- Có LESSON_EXCERPT mà tin nhắn lạc đề (grounding rất thấp) → confidence=low;
+  không cho high chỉ vì câu nghe “hay”
 
-## Quy tắc misconceptions — mặc định là [] 
-CHỈ ghi misconception khi học viên KHẲNG ĐỊNH một điều sai (câu khẳng định, hoặc câu hỏi
-đuôi kiểu "... đúng không?" kèm nội dung sai). Tối đa 3 item, mỗi item ngắn và cụ thể.
+## Quy tắc misconceptions — mặc định []
+CHỈ ghi khi học viên KHẲNG ĐỊNH điều sai (hoặc "... đúng không?" kèm nội dung sai).
+Ưu tiên đối chiếu với đúng ý trong LESSON_EXCERPT. Tối đa 3 item, cụ thể.
 
-TUYỆT ĐỐI KHÔNG ghi misconception trong các trường hợp sau:
-- Học viên chỉ ĐẶT CÂU HỎI MỞ ("... là gì", "... do đâu", "tại sao ...", "... khác gì nhau",
-  "có mấy loại ..."). Hỏi không phải là hiểu sai.
-- Học viên chưa biết / chưa nhắc tới một kiến thức. Thiếu kiến thức KHÔNG phải misconception.
-- Học viên dùng phép ẩn dụ hoặc cách hình dung mà về cơ bản ĐÚNG, dù chưa chính xác tuyệt đối.
-- Tin nhắn quá ngắn, greeting, vô nghĩa, hoặc yêu cầu ngoài phạm vi.
-- Không viết misconception kiểu chung chung như "chưa hiểu bài", "thiếu kiến thức nền".
-
-Tự kiểm trước khi trả về: trích được CHÍNH XÁC câu nào của học viên chứa phát biểu sai?
-Nếu không trích được → misconceptions phải là [].
+TUYỆT ĐỐI KHÔNG ghi misconception khi:
+- Chỉ đặt câu hỏi mở ("là gì", "tại sao", "khác gì")
+- Thiếu kiến thức / chưa nhắc tới
+- Ẩn dụ về cơ bản đúng
+- Greeting / ngắn / ngoài phạm vi
+- Không trích được đúng câu chứa phát biểu sai → misconceptions = []
 """
 
 
@@ -59,6 +76,13 @@ class EstimateResult:
     misconceptions: list[str] = field(default_factory=list)
     provider: str = "mock"
     raw: dict | None = None
+    matrix: UnderstandingMatrix | None = None
+    matrix_comment: str = ""
+
+    def matrix_dict(self) -> dict[str, Any]:
+        if self.matrix is None:
+            return {}
+        return self.matrix.to_dict()
 
 
 def _clamp_score(value: object) -> int:
@@ -72,7 +96,7 @@ def _clamp_score(value: object) -> int:
 def _norm_confidence(value: object) -> Confidence:
     v = str(value or "medium").strip().lower()
     if v in {"low", "medium", "high"}:
-        return v  # type: ignore[return-value]
+        return v  # type: ignore[return-type]
     return "medium"
 
 
@@ -87,13 +111,31 @@ def _norm_misconceptions(value: object) -> list[str]:
     return out
 
 
+def _adjust_confidence(conf: Confidence, matrix: UnderstandingMatrix) -> Confidence:
+    if matrix.paste_detected:
+        return "low"
+    if matrix.has_lesson_context and matrix.lesson_grounding < 22:
+        if conf == "high":
+            return "medium"
+        if conf == "medium":
+            return "low"
+    return conf
+
+
 def estimate_understanding(ctx: ConversationContext) -> EstimateResult:
     mode = resolve_mode()
     if mode == "mock":
         return _mock_estimate(ctx)
 
+    pre_matrix = compute_understanding_matrix(ctx)
     user = f"""TOPIC_HINT: {ctx.topic_hint or "(không có)"}
-DAY_CODE: {ctx.day_code or "(không có)"}
+DAY_CODE / SESSION: {ctx.session_id or ctx.day_code or "(không có)"}
+OVERLAP_WITH_LESSON: {ctx.lesson.overlap_ratio}
+
+{matrix_prompt_block(pre_matrix)}
+
+LESSON_CONTEXT (slide/transcript excerpt):
+{ctx.lesson_prompt()}
 
 HISTORY:
 {ctx.history_text() or "(trống — turn đầu)"}
@@ -103,14 +145,26 @@ STUDENT_LATEST:
 """
     try:
         data, provider = call_llm_json(SYSTEM_PROMPT, user)
+        misc = _norm_misconceptions(data.get("misconceptions"))
+        matrix = compute_understanding_matrix(ctx, misconceptions=misc)
+        score = apply_matrix_guards(_clamp_score(data.get("understanding_score")), matrix)
+        reason = str(data.get("understanding_reason") or "").strip() or "Không có lý do từ model."
+        if matrix.paste_detected and "dán" not in reason.lower() and "trùng" not in reason.lower():
+            reason = (
+                "Tin nhắn trùng cao với excerpt slide — chưa phải bằng chứng tự hiểu. " + reason
+            )[:280]
+        comment = str(data.get("matrix_comment") or "").strip()
+        if not comment and matrix.notes:
+            comment = matrix.notes[0]
         return EstimateResult(
-            understanding_score=_clamp_score(data.get("understanding_score")),
-            understanding_reason=str(data.get("understanding_reason") or "").strip()
-            or "Không có lý do từ model.",
-            confidence=_norm_confidence(data.get("confidence")),
-            misconceptions=_norm_misconceptions(data.get("misconceptions")),
+            understanding_score=score,
+            understanding_reason=reason,
+            confidence=_adjust_confidence(_norm_confidence(data.get("confidence")), matrix),
+            misconceptions=[] if matrix.paste_detected else misc,
             provider=provider,
             raw=data,
+            matrix=matrix,
+            matrix_comment=comment,
         )
     except Exception as exc:  # noqa: BLE001 — fallback for demo resilience
         mock = _mock_estimate(ctx)
@@ -121,100 +175,46 @@ STUDENT_LATEST:
 
 def _mock_estimate(ctx: ConversationContext) -> EstimateResult:
     """Heuristic judge — chỉ dùng khi không có API key / fallback."""
-    text = ctx.student_latest.lower()
-    misconceptions: list[str] = []
-
-    # Explicit wrong claims (synthetic patterns)
-    if re.search(r"stack\s*(là|=)\s*queue|queue\s*(là|=)\s*stack|nhầm.*stack.*queue", text):
-        misconceptions.append("Nhầm Stack với Queue")
-    if re.search(r"binary search.*(o\(n\)|tuyến tính)|độ phức tạp.*binary.*o\(n\)", text):
-        misconceptions.append("Sai Big-O của Binary Search (cho là O(n))")
-    if re.search(
-        r"google\s*search|llm.*=.*google|llm.*(chỉ\s*là|là)\s*.*search|máy tìm kiếm",
-        text,
-    ):
-        misconceptions.append("Hiểu sai bản chất LLM (coi như máy tìm kiếm)")
-
-    # Low-signal requests
-    summarize = bool(re.search(r"tóm tắt|tom tat|tóm gọn|summary", text))
-    what_is = bool(re.search(r"là gì\b|la gi\b", text)) and len(text) < 120
-    short = len(text.strip()) < 12 or text.strip() in {"hi", "ok", "hả", "asds", "hello"}
-    out_of_scope = bool(re.search(r"làm giúp|viết giúp|làm hộ|đáp án quiz|cho điểm|base64", text))
-    self_explain = bool(
-        re.search(
-            r"theo em|theo mình|tôi hiểu|em hiểu|em đang hình dung|em nhớ|đúng vậy|đúng không",
-            text,
+    pre = compute_understanding_matrix(ctx)
+    misc = [] if pre.paste_detected else [
+        m
+        for m in (
+            "Nhầm Stack với Queue"
+            if re.search(
+                r"stack\s*(là|=)\s*queue|queue\s*(là|=)\s*stack|nhầm.*stack.*queue",
+                ctx.student_latest.lower(),
+            )
+            else None,
+            "Sai Big-O của Binary Search (cho là O(n))"
+            if re.search(
+                r"binary search.*(o\(n\)|tuyến tính)|độ phức tạp.*binary.*o\(n\)",
+                ctx.student_latest.lower(),
+            )
+            else None,
+            "Hiểu sai bản chất LLM (coi như máy tìm kiếm)"
+            if re.search(
+                r"google\s*search|llm.*=.*google|llm.*(chỉ\s*là|là)\s*.*search|máy tìm kiếm",
+                ctx.student_latest.lower(),
+            )
+            else None,
         )
+        if m
+    ]
+    matrix = compute_understanding_matrix(ctx, misconceptions=misc)
+    score = matrix.composite_baseline()
+    conf: Confidence = "low" if (matrix.paste_detected or score < 40) else (
+        "high" if misc or score >= 75 else "medium"
     )
-
-    if misconceptions:
-        return EstimateResult(
-            understanding_score=28,
-            understanding_reason="Học viên lộ tín hiệu hiểu sai khái niệm trong câu hỏi.",
-            confidence="high",
-            misconceptions=misconceptions,
-            provider="mock",
-        )
-
-    if short:
-        return EstimateResult(
-            understanding_score=15,
-            understanding_reason="Tin nhắn quá ngắn / chưa lộ mức hiểu về nội dung bài.",
-            confidence="low",
-            misconceptions=[],
-            provider="mock",
-        )
-
-    if out_of_scope:
-        return EstimateResult(
-            understanding_score=20,
-            understanding_reason="Yêu cầu ngoài phạm vi học tập; chưa thể hiện hiểu bài.",
-            confidence="low",
-            misconceptions=[],
-            provider="mock",
-        )
-
-    # Explains / compares / applies → higher (trước what_is / summarize)
-    if self_explain:
-        return EstimateResult(
-            understanding_score=78,
-            understanding_reason="Học viên đang diễn đạt / kiểm chứng bằng lời mình — tín hiệu hiểu khá tốt.",
-            confidence="medium",
-            misconceptions=[],
-            provider="mock",
-        )
-
-    if summarize:
-        return EstimateResult(
-            understanding_score=32,
-            understanding_reason="Chỉ yêu cầu tóm tắt/slide — chưa chứng minh đã hiểu bằng lời mình.",
-            confidence="low",
-            misconceptions=[],
-            provider="mock",
-        )
-
-    if what_is:
-        return EstimateResult(
-            understanding_score=38,
-            understanding_reason="Đang hỏi định nghĩa lần đầu; chưa có bằng chứng hiểu sâu.",
-            confidence="low",
-            misconceptions=[],
-            provider="mock",
-        )
-
-    if re.search(r"giải thích|explain|tại sao|như thế nào|khác gì|khác nhau", text):
-        return EstimateResult(
-            understanding_score=45,
-            understanding_reason="Đang tìm hiểu khái niệm; mức hiểu trung bình-thấp trước khi được kiểm tra.",
-            confidence="medium",
-            misconceptions=[],
-            provider="mock",
-        )
-
+    conf = _adjust_confidence(conf, matrix)
+    reason = (matrix.notes[0] if matrix.notes else "Ước lượng theo matrix baseline.")
+    if matrix.has_lesson_context and matrix.lesson_grounding >= 40 and not matrix.paste_detected:
+        reason = f"{reason} (bám slide/transcript: {matrix.lesson_grounding}%)."
     return EstimateResult(
-        understanding_score=42,
-        understanding_reason="Có câu hỏi học tập nhưng chưa đủ tín hiệu để kết luận hiểu sâu.",
-        confidence="medium",
-        misconceptions=[],
+        understanding_score=score,
+        understanding_reason=reason[:280],
+        confidence=conf,
+        misconceptions=misc,
         provider="mock",
+        matrix=matrix,
+        matrix_comment=matrix.notes[0] if matrix.notes else "",
     )

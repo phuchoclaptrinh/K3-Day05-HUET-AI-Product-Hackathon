@@ -14,6 +14,19 @@ Nguyên tắc gốc (project brief §7): điểm hiểu phản ánh việc học
 
 Lưu ý quan trọng: **“hỏi một câu khó” không làm tăng band.** Học viên dán một đoạn slide phức tạp và nói “giải thích giúp em” vẫn là `low`, vì chưa có bằng chứng hiểu nào.
 
+## Understanding Matrix (baseline gắn ngữ cảnh slide)
+
+Prototype chấm theo **4 trục** (`learning_engine/understanding_matrix.py`), neo bởi `LESSON_EXCERPT` (PDF upload hoặc transcript):
+
+| Trục | Ý nghĩa | Ảnh hưởng điểm |
+|---|---|---|
+| `evidence` | Bằng chứng tự hiểu (tự diễn đạt / kiểm chứng) | Trọng số chính (~55%) |
+| `lesson_grounding` | Tin nhắn bám khái niệm trong excerpt slide | Hỗ trợ confidence; **không** đẩy mid/high nếu chỉ hỏi “là gì” |
+| `authenticity` | Không dán nguyên văn slide (`1 − overlap`) | `PASTE_DETECTED` (overlap ≥ 0.55) → trần **0–35** |
+| `concept_accuracy` | Không khẳng định sai so với đúng ý bài | Có misconception → trần thấp |
+
+Hard-rule sau LLM: paste / misconception / (có excerpt nhưng grounding cực thấp) → áp trần điểm. UI bảng đánh giá hiện 4 thanh matrix cạnh % tổng.
+
 ## Bốn chiều chất lượng
 
 | # | Chiều | Pass khi |
@@ -61,14 +74,13 @@ Lưu ý quan trọng: **“hỏi một câu khó” không làm tăng band.** H�
 | 3 | Bỏ luật “nới band” trong `run_eval.py`, chuyển sang khớp band nghiêm ngặt | Luật nới làm điểm không kiểm chứng lại được bởi người ngoài nhóm |
 | 4 | Siết prompt: chỉ ghi misconception khi học viên **khẳng định** điều sai; thêm danh sách trường hợp tuyệt đối không ghi (câu hỏi mở, thiếu kiến thức, ẩn dụ về cơ bản đúng); thêm bước tự kiểm “trích được chính xác câu nào?” | Run 4 có 3 case bịa misconception từ câu hỏi mở (G06, G09) và từ một phép ẩn dụ đúng (G19) — vi phạm điều kiện cứng của quality bar |
 | 4 | Đưa thang điểm 3 band vào thẳng prompt | Model tự ý coi “câu hỏi khó” là dấu hiệu hiểu bài, lệch khỏi định nghĩa band của nhóm |
+| CP4+ | Thêm **Understanding Matrix** 4 trục + retrieve slide/transcript vào Context | Case G07 (dán slide) cần ground truth excerpt; hỏi đúng bài ≠ đã hiểu |
 
 ## Case còn fail sau run 5 — nguyên nhân gốc
 
 **G07** (`turn_id=T0014`): học viên **dán lại nguyên văn** một đoạn key-takeaways từ slide rồi nhờ giải thích. Nhãn kỳ vọng là `low`; model cho **90 (`high`)** với lý do “học viên đã tự diễn đạt lại khái niệm cốt lõi”.
 
-Nguyên nhân gốc: prototype hiện **chưa truyền nội dung slide** vào context, nên model không có cách nào phân biệt *dán lại tài liệu* với *tự diễn đạt bằng lời mình* — hai trường hợp có ý nghĩa sư phạm trái ngược nhau. Đây cũng chính là rủi ro lớp ① (nguồn sự thật) trong spec.
-
-Hướng sửa (CP4/CP5): truyền `topic_hint` = excerpt đoạn học viên bôi đen vào Context Builder, và thêm luật “nếu tin nhắn trùng lặp cao với excerpt thì KHÔNG tính là bằng chứng hiểu”. Chưa làm trong CP3 để giữ lát cắt mỏng.
+Nguyên nhân gốc (đã xử lý trong prototype): truyền `LESSON_EXCERPT` + `overlap_ratio` / `PASTE_DETECTED` vào estimator; hard-rule trần 0–35 khi trùng excerpt cao. Cần re-run eval (run 6+) để xác nhận G07.
 
 ## Quan sát cần ghi vào spec
 

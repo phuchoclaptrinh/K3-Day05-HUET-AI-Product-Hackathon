@@ -29,7 +29,8 @@ Quy tắc BẮT BUỘC:
 - CẤM đề bài kiểu: "Theo bạn...", "Bạn hãy giải thích...", "Tại sao bạn nghĩ...", "Nêu ví dụ...".
 - Đúng 4 lựa chọn A/B/C/D; chỉ 1 đáp án đúng; distractor hợp lý.
 - Không lộ đáp án trong đề bài.
-- Bám teaching_strategy và misconception (nếu có).
+- Bám teaching_strategy, misconception (nếu có), và LESSON_EXCERPT (nội dung buổi học).
+- Câu hỏi phải kiểm tra đúng khái niệm trong excerpt / topic_hint, không lạc đề.
 - Nếu có misconception → ít nhất 1 lựa chọn phản ánh đúng misconception đó.
 """
 
@@ -203,6 +204,9 @@ def generate_followup(
 STUDENT_LATEST: {ctx.student_latest}
 HISTORY:
 {ctx.history_text() or "(trống)"}
+
+LESSON_CONTEXT (slide/transcript excerpt — bám câu hỏi theo đây):
+{ctx.lesson_prompt()}
 
 UNDERSTANDING_SCORE: {understanding_score}
 CONFIDENCE: {confidence}
