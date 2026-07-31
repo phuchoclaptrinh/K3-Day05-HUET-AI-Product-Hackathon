@@ -10,3 +10,4 @@ codebase/.user_lessons/
 *.pyc
 scripts/_sample_out.json
 .venv/
+.env

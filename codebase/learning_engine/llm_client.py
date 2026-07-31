@@ -82,7 +82,7 @@ def _gemini_generate(system: str, user: str, json_mode: bool) -> str:
     from google.genai import types
 
     client = genai.Client(api_key=_gemini_key())
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
     config: dict[str, Any] = {"system_instruction": system}
     if json_mode:
